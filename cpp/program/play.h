@@ -43,8 +43,8 @@ struct ForkData {
 
 struct ExtraBlackAndKomi {
   int extraBlack = 0;
-  float komi = 7.5;
-  float komiBase = 7.5;
+  float komiMean = 7.5f;
+  float komiStdev = 7.5f;
   bool makeGameFair = false;
   bool makeGameFairForEmptyBoard = false;
   bool allowInteger = true;
@@ -109,6 +109,10 @@ class GameInitializer {
   bool isAllowedBSize(int xSize, int ySize);
 
   std::vector<int> getAllowedBSizes() const;
+  int getMinBoardXSize() const;
+  int getMinBoardYSize() const;
+  int getMaxBoardXSize() const;
+  int getMaxBoardYSize() const;
 
  private:
   void initShared(ConfigParser& cfg, Logger& logger);
@@ -162,6 +166,11 @@ class GameInitializer {
   std::vector<Sgf::PositionSample> hintPoses;
   std::vector<double> hintPosCumProbs;
   double hintPosesProb;
+
+  int minBoardXSize;
+  int minBoardYSize;
+  int maxBoardXSize;
+  int maxBoardYSize;
 };
 
 
@@ -308,6 +317,7 @@ public:
 
   //Will return NULL if stopped before the game completes. The caller is responsible for freeing the data
   //if it isn't NULL.
+  //afterInitialization can be used to run any post-initialization configuration on the search
   FinishedGameData* runGame(
     const std::string& seed,
     const MatchPairer::BotSpec& botSpecB,
@@ -317,8 +327,8 @@ public:
     Logger& logger,
     const std::function<bool()>& shouldStop,
     std::function<NNEvaluator*()> checkForNewNNEval,
-    std::function<void(const Board&, const BoardHistory&, Player, Loc, const std::vector<double>&, const std::vector<double>&, const std::vector<double>&, const Search*)> onEachMove,
-    bool alwaysIncludeOwnership
+    std::function<void(const MatchPairer::BotSpec&, Search*)> afterInitialization,
+    std::function<void(const Board&, const BoardHistory&, Player, Loc, const std::vector<double>&, const std::vector<double>&, const std::vector<double>&, const Search*)> onEachMove
   );
 
   const GameInitializer* getGameInitializer() const;

@@ -1,6 +1,7 @@
 #include "../core/global.h"
 #include "../core/config_parser.h"
 #include "../core/datetime.h"
+#include "../core/fileutils.h"
 #include "../core/timer.h"
 #include "../core/makedir.h"
 #include "../core/os.h"
@@ -14,14 +15,14 @@
 #include "../program/setup.h"
 #include "../program/selfplaymanager.h"
 #include "../tests/tinymodel.h"
+#include "../tests/tests.h"
 #include "../command/commandline.h"
 #include "../main.h"
 
 #ifndef BUILD_DISTRIBUTED
 
-int MainCmds::contribute(int argc, const char* const* argv) {
-  (void)argc;
-  (void)argv;
+int MainCmds::contribute(const std::vector<std::string>& args) {
+  (void)args;
   std::cout << "This version of KataGo was NOT compiled with support for distributed training." << std::endl;
   std::cout << "Compile with -DBUILD_DISTRIBUTED=1 in CMake, and/or see notes at https://github.com/lightvector/KataGo#compiling-katago" << std::endl;
   return 0;
@@ -241,16 +242,21 @@ static void runAndUploadSingleGame(
 
       // Usual analysis response fields
       ret["turnNumber"] = hist.moveHistory.size();
-      search->getAnalysisJson(perspective,board,hist,analysisPVLen,ownershipMinVisits,preventEncore,true,alwaysIncludeOwnership,false,false,ret);
+      search->getAnalysisJson(perspective,analysisPVLen,ownershipMinVisits,preventEncore,true,alwaysIncludeOwnership,false,false,false,false,ret);
       std::cout << ret.dump() + "\n" << std::flush; // no endl due to race conditions
     }
 
   };
 
   const Sgf::PositionSample* posSample = gameTask.repIdx < gameTask.task.startPoses.size() ? &(gameTask.task.startPoses[gameTask.repIdx]) : NULL;
+  std::function<void(const MatchPairer::BotSpec&, Search*)> afterInitialization = [alwaysIncludeOwnership](const MatchPairer::BotSpec& spec, Search* search) {
+    (void)spec;
+    if(alwaysIncludeOwnership)
+      search->setAlwaysIncludeOwnerMap(true);
+  };
   FinishedGameData* gameData = gameRunner->runGame(
     seed, botSpecB, botSpecW, forkData, posSample,
-    logger, shouldStopFunc, nullptr, onEachMove, alwaysIncludeOwnership
+    logger, shouldStopFunc, nullptr, afterInitialization, onEachMove
   );
 
   if(gameData != NULL) {
@@ -261,7 +267,18 @@ static void runAndUploadSingleGame(
       sgfOutputDir = sgfsDir + "/" + nnEvalBlack->getModelName();
     string sgfFile = sgfOutputDir + "/" + gameIdString + ".sgf";
 
-    ofstream out(sgfFile);
+    ofstream out;
+    try {
+      FileUtils::open(out,sgfFile);
+    }
+    catch(const StringError& e) {
+      logger.write("WARNING: Terminating game " + Global::int64ToString(gameIdx) + ", error writing SGF file, skipping and not uploading this game, " + e.what());
+      out.close();
+      delete gameData;
+      delete gameRunner;
+      return;
+    }
+
     WriteSgf::writeSgf(out,gameData->bName,gameData->wName,gameData->endHist,gameData,false,true);
     out.close();
     if(outputEachMove != nullptr) {
@@ -272,6 +289,8 @@ static void runAndUploadSingleGame(
 
     static constexpr bool retryOnFailure = true;
     if(gameTask.task.doWriteTrainingData) {
+      //Pre-upload, verify that the GPU is okay.
+      Tests::runCanaryTests(nnEvalBlack, NNInputs::SYMMETRY_NOTSPECIFIED, false);
       gameTask.blackManager->withDataWriters(
         nnEvalBlack,
         [gameData,&gameTask,gameIdx,&sgfFile,&connection,&logger,&shouldStopFunc](TrainingDataWriter* tdataWriter, TrainingDataWriter* vdataWriter, std::ofstream* sgfOut) {
@@ -326,7 +345,7 @@ static void runAndUploadSingleGame(
 }
 
 
-int MainCmds::contribute(int argc, const char* const* argv) {
+int MainCmds::contribute(const vector<string>& args) {
   Board::initHash();
   ScoreValue::initTables();
   Rand seedRand;
@@ -354,7 +373,7 @@ int MainCmds::contribute(int argc, const char* const* argv) {
     cmd.add(userConfigFileArg);
     cmd.add(overrideUserConfigArg);
     cmd.add(caCertsFileArg);
-    cmd.parse(argc,argv);
+    cmd.parseArgs(args);
     baseDir = baseDirArg.getValue();
     deleteUnusedModelsAfterDays = deleteUnusedModelsAfterDaysArg.getValue();
     userConfigFile = userConfigFileArg.getValue();
@@ -415,9 +434,9 @@ int MainCmds::contribute(int argc, const char* const* argv) {
 
     bool foundCaCerts = false;
     for(const string& path: possiblePaths) {
-      std::ifstream infile(path);
-      bool pathExists = infile.good();
-      if(pathExists) {
+      std::ifstream infile;
+      bool couldOpen = FileUtils::tryOpen(infile,path);
+      if(couldOpen) {
         foundCaCerts = true;
         caCertsFile = path;
         break;
@@ -434,9 +453,9 @@ int MainCmds::contribute(int argc, const char* const* argv) {
   }
   else {
     if(caCertsFile != "/dev/null") {
-      std::ifstream infile(caCertsFile);
-      bool pathExists = infile.good();
-      if(!pathExists) {
+      std::ifstream infile;
+      bool couldOpen = FileUtils::tryOpen(infile,caCertsFile);
+      if(!couldOpen) {
         throw StringError("cacerts file was not found or could not be opened: " + caCertsFile);
       }
     }
@@ -571,7 +590,8 @@ int MainCmds::contribute(int argc, const char* const* argv) {
   logger.write(string("Git revision: ") + Version::getGitRevision());
 
   {
-    NNEvaluator* tinyNNEval = TinyModelTest::runTinyModelTest(baseDir, logger, *userCfg);
+    const bool randFileName = true;
+    NNEvaluator* tinyNNEval = TinyModelTest::runTinyModelTest(baseDir, logger, *userCfg, randFileName);
     //Before we delete the tinyNNEval, it conveniently has all the info about what gpuidxs the user wants from the config, so
     //use it to tune everything.
 #ifdef USE_OPENCL_BACKEND
@@ -664,6 +684,7 @@ int MainCmds::contribute(int argc, const char* const* argv) {
     std::unique_ptr<std::ostream> outputEachMove = nullptr;
     std::function<void()> flushOutputEachMove = nullptr;
     if(gameLoopThreadIdx == 0 && watchOngoingGameInFile) {
+      // TODO someday - doesn't handle non-ascii paths.
 #ifdef OS_IS_WINDOWS
       FILE* file = NULL;
       fopen_s(&file, watchOngoingGameInFileName.c_str(), "a");
@@ -710,13 +731,19 @@ int MainCmds::contribute(int argc, const char* const* argv) {
 
   bool userCfgWarnedYet = false;
 
+  ClockTimer invalidModelErrorTimer;
+  double invalidModelErrorEwms = 0.0;
+  double lastInvalidModelErrorTime = invalidModelErrorTimer.getSeconds();
+  std::mutex invalidModelErrorMutex;
+
   auto loadNeuralNetIntoManager =
-    [&runParams,&tdataDir,&sgfsDir,&logger,&userCfg,maxSimultaneousGames,maxSimultaneousRatingGamesPossible,&userCfgWarnedYet](
+    [&runParams,&tdataDir,&sgfsDir,&logger,&userCfg,maxSimultaneousGames,maxSimultaneousRatingGamesPossible,&userCfgWarnedYet,
+     &invalidModelErrorTimer,&invalidModelErrorEwms,&lastInvalidModelErrorTime,&invalidModelErrorMutex](
       SelfplayManager* manager, const Client::ModelInfo modelInfo, const string& modelFile, bool isRatingManager
     ) {
     const string& modelName = modelInfo.name;
     if(manager->hasModel(modelName))
-      return;
+      return true;
 
     logger.write("Found new neural net " + modelName);
 
@@ -730,15 +757,36 @@ int MainCmds::contribute(int argc, const char* const* argv) {
       //must have been valid at download time), but also rename the file out of the way so that if we restart the program, the next try
       //will do a fresh download.
       string newName = modelFile + ".invalid";
-      logger.write("Model file modified or corrupted on disk, sha256 no longer matches? Moving it to " + newName + " and failing.");
-      std::rename(modelFile.c_str(),newName.c_str());
-      throw;
+      logger.write("Model file modified or corrupted on disk, sha256 no longer matches? Moving it to " + newName + " and trying again later.");
+      FileUtils::rename(modelFile,newName);
+
+      {
+        std::lock_guard<std::mutex> lock(invalidModelErrorMutex);
+        double now = invalidModelErrorTimer.getSeconds();
+        double elapsed = std::max(0.0, now - lastInvalidModelErrorTime);
+        // Ignore errors happening consecutively in a short time due to one corruption
+        if(elapsed > 10.0) {
+          //Tolerate a mis-download rate of 5 over about 24 hours. Tolerance here ensures we don't hammer the server with repeated downloads
+          //if there is a true mismatch between hash and file, or some other issue that reliably corrupts the file on disk.
+          invalidModelErrorEwms *= exp(-elapsed / (60 * 60 * 24));
+          invalidModelErrorEwms += 1.0;
+          lastInvalidModelErrorTime = now;
+
+          if(invalidModelErrorEwms > 5.0) {
+            throw;
+          }
+        }
+      }
+      // Wait a little and try again.
+      std::this_thread::sleep_for(std::chrono::duration<double>(10));
+      return false;
     }
 
-    int maxSimultaneousGamesThisNet = isRatingManager ? maxSimultaneousRatingGamesPossible : maxSimultaneousGames;
-    int maxConcurrentEvals = runParams.maxSearchThreadsAllowed * maxSimultaneousGamesThisNet * 2 + 16;
-    int expectedConcurrentEvals = runParams.maxSearchThreadsAllowed * maxSimultaneousGamesThisNet;
-    int defaultMaxBatchSize = maxSimultaneousGamesThisNet;
+    const int maxSimultaneousGamesThisNet = isRatingManager ? maxSimultaneousRatingGamesPossible : maxSimultaneousGames;
+    const int maxConcurrentEvals = runParams.maxSearchThreadsAllowed * maxSimultaneousGamesThisNet * 2 + 16;
+    const int expectedConcurrentEvals = runParams.maxSearchThreadsAllowed * maxSimultaneousGamesThisNet;
+    const bool defaultRequireExactNNLen = false;
+    const int defaultMaxBatchSize = maxSimultaneousGamesThisNet;
 
     //Unlike local self-play, which waits to accumulate a fixed number of rows before writing, distributed selfplay writes
     //training data game by game. So we set a buffer size here large enough to always hold all the rows of a game.
@@ -749,7 +797,7 @@ int MainCmds::contribute(int argc, const char* const* argv) {
     Rand rand;
     NNEvaluator* nnEval = Setup::initializeNNEvaluator(
       modelName,modelFile,modelInfo.sha256,*userCfg,logger,rand,maxConcurrentEvals,expectedConcurrentEvals,
-      NNPos::MAX_BOARD_LEN,NNPos::MAX_BOARD_LEN,defaultMaxBatchSize,
+      NNPos::MAX_BOARD_LEN,NNPos::MAX_BOARD_LEN,defaultMaxBatchSize,defaultRequireExactNNLen,
       Setup::SETUP_FOR_DISTRIBUTED
     );
     assert(!nnEval->isNeuralNetLess() || modelFile == "/dev/null");
@@ -776,6 +824,7 @@ int MainCmds::contribute(int argc, const char* const* argv) {
 
     logger.write("Loaded new neural net " + nnEval->getModelName());
     manager->loadModelNoDataWritingLoop(nnEval, tdataWriter, vdataWriter, sgfOut);
+    return true;
   };
 
   //-----------------------------------------------------------------------------------------------------------------
@@ -830,6 +879,9 @@ int MainCmds::contribute(int argc, const char* const* argv) {
   auto preDownloadLoop = [&]() {
     if(disablePredownloadLoop)
       return;
+    //Wait a while before starting the download loop, so that it doesn't get confusing with other attempts to
+    //form the initial connection.
+    std::this_thread::sleep_for(std::chrono::duration<double>(30));
     Rand preDownloadLoopRand;
     while(true) {
       if(shouldStopGracefullyFunc())
@@ -1002,8 +1054,12 @@ int MainCmds::contribute(int argc, const char* const* argv) {
         whiteManager = selfplayManager;
       }
 
-      loadNeuralNetIntoManager(blackManager,task.modelBlack,modelFileBlack,task.isRatingGame);
-      loadNeuralNetIntoManager(whiteManager,task.modelWhite,modelFileWhite,task.isRatingGame);
+      suc = loadNeuralNetIntoManager(blackManager,task.modelBlack,modelFileBlack,task.isRatingGame);
+      if(!suc)
+        continue;
+      suc = loadNeuralNetIntoManager(whiteManager,task.modelWhite,modelFileWhite,task.isRatingGame);
+      if(!suc)
+        continue;
       if(shouldStopGracefullyFunc())
         break;
 

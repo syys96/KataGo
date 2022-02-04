@@ -1,5 +1,6 @@
 #include "../dataio/sgf.h"
 
+#include "../core/fileutils.h"
 #include "../core/sha2.h"
 
 #include "../external/nlohmann_json/json.hpp"
@@ -317,8 +318,8 @@ static void checkNonEmpty(const vector<SgfNode*>& nodes) {
 
 XYSize Sgf::getXYSize() const {
   checkNonEmpty(nodes);
-  int xSize;
-  int ySize;
+  int xSize = 0; //Initialize to 0 to suppress spurious clang compiler warning.
+  int ySize = 0; //Initialize to 0 to suppress spurious clang compiler warning.
   if(!nodes[0]->hasProperty("SZ"))
     return XYSize(19,19); //Some SGF files don't specify, in that case assume 19
 
@@ -338,8 +339,8 @@ XYSize Sgf::getXYSize() const {
     ySize = xSize;
   }
 
-  if(xSize <= 0 || ySize <= 0)
-    propertyFail("Board size in sgf is <= 0: " + s);
+  if(xSize <= 1 || ySize <= 1)
+    propertyFail("Board size in sgf is <= 1: " + s);
   if(xSize > Board::MAX_LEN || ySize > Board::MAX_LEN)
     propertyFail(
       "Board size in sgf is > Board::MAX_LEN = " + Global::intToString((int)Board::MAX_LEN) +
@@ -382,6 +383,8 @@ float Sgf::getKomi() const {
       komi = 7.0f;
     else if(komi == 0)
       komi = 0.0f;
+    else if(komi == 6.5 || komi == 7.5 || komi == 7)
+    {}
     else
       propertyFail("Currently no case implemented for foxwq komi: " + Global::floatToString(komi));
   }
@@ -418,6 +421,20 @@ Rules Sgf::getRulesOrFail() const {
 Player Sgf::getSgfWinner() const {
   checkNonEmpty(nodes);
   return nodes[0]->getSgfWinner();
+}
+
+Color Sgf::getFirstPlayerColor() const {
+  Color plColor = nodes[0]->getPLSpecifiedColor();
+  if(plColor == C_BLACK || plColor == C_WHITE)
+    return plColor;
+  XYSize size = getXYSize();
+  int xSize = size.x;
+  int ySize = size.y;
+  vector<Move> moves;
+  getMoves(moves,xSize,ySize);
+  if(moves.size() > 0)
+    return moves[0].pla;
+  return C_BLACK;
 }
 
 int Sgf::getRank(Player pla) const {
@@ -570,6 +587,9 @@ void Sgf::getMovesHelper(vector<Move>& moves, int xSize, int ySize) const {
 void Sgf::loadAllUniquePositions(
   std::set<Hash128>& uniqueHashes,
   bool hashComments,
+  bool hashParent,
+  bool flipIfPassOrWFirst,
+  Rand* rand,
   vector<PositionSample>& samples
 ) const {
   std::function<void(PositionSample&, const BoardHistory&, const string&)> f = [&samples](PositionSample& sample, const BoardHistory& hist, const string& comments) {
@@ -578,12 +598,15 @@ void Sgf::loadAllUniquePositions(
     samples.push_back(sample);
   };
 
-  iterAllUniquePositions(uniqueHashes,hashComments,f);
+  iterAllUniquePositions(uniqueHashes,hashComments,hashParent,flipIfPassOrWFirst,rand,f);
 }
 
 void Sgf::iterAllUniquePositions(
   std::set<Hash128>& uniqueHashes,
   bool hashComments,
+  bool hashParent,
+  bool flipIfPassOrWFirst,
+  Rand* rand,
   std::function<void(PositionSample&,const BoardHistory&,const std::string&)> f
 ) const {
   XYSize size = getXYSize();
@@ -601,7 +624,7 @@ void Sgf::iterAllUniquePositions(
 
   PositionSample sampleBuf;
   std::vector<std::pair<int64_t,int64_t>> variationTraceNodesBranch;
-  iterAllUniquePositionsHelper(board,hist,nextPla,rules,xSize,ySize,sampleBuf,0,uniqueHashes,hashComments,variationTraceNodesBranch,f);
+  iterAllUniquePositionsHelper(board,hist,nextPla,rules,xSize,ySize,sampleBuf,0,uniqueHashes,hashComments,hashParent,flipIfPassOrWFirst,rand,variationTraceNodesBranch,f);
 }
 
 void Sgf::iterAllUniquePositionsHelper(
@@ -611,6 +634,9 @@ void Sgf::iterAllUniquePositionsHelper(
   int initialTurnNumber,
   std::set<Hash128>& uniqueHashes,
   bool hashComments,
+  bool hashParent,
+  bool flipIfPassOrWFirst,
+  Rand* rand,
   std::vector<std::pair<int64_t,int64_t>>& variationTraceNodesBranch,
   std::function<void(PositionSample&,const BoardHistory&,const std::string&)> f
 ) const {
@@ -646,7 +672,7 @@ void Sgf::iterAllUniquePositionsHelper(
 
         hist.clear(board,nextPla,rules,0);
       }
-      samplePositionIfUniqueHelper(board,hist,nextPla,sampleBuf,initialTurnNumber,uniqueHashes,hashComments,comments,f);
+      samplePositionIfUniqueHelper(board,hist,nextPla,sampleBuf,initialTurnNumber,uniqueHashes,hashComments,hashParent,flipIfPassOrWFirst,comments,f);
     }
 
     //Handle actual moves
@@ -671,15 +697,29 @@ void Sgf::iterAllUniquePositionsHelper(
       if(hist.moveHistory.size() > 0x3FFFFFFF)
         throw StringError("too many moves in sgf");
       nextPla = getOpp(buf[j].pla);
-      samplePositionIfUniqueHelper(board,hist,nextPla,sampleBuf,initialTurnNumber,uniqueHashes,hashComments,comments,f);
+      samplePositionIfUniqueHelper(board,hist,nextPla,sampleBuf,initialTurnNumber,uniqueHashes,hashComments,hashParent,flipIfPassOrWFirst,comments,f);
     }
   }
 
-  for(size_t i = 0; i<children.size(); i++) {
+
+  std::vector<size_t> permutation(children.size());
+  for(size_t i = 0; i<children.size(); i++)
+    permutation[i] = i;
+  if(rand != NULL) {
+    for(size_t i = 1; i<permutation.size(); i++) {
+      size_t r = (size_t)rand->nextUInt64(i+1);
+      std::swap(permutation[i],permutation[r]);
+    }
+  }
+
+  for(size_t c = 0; c<children.size(); c++) {
+    size_t i = permutation[c];
     std::unique_ptr<Board> copy = std::make_unique<Board>(board);
     std::unique_ptr<BoardHistory> histCopy = std::make_unique<BoardHistory>(hist);
     variationTraceNodesBranch.push_back(std::make_pair((int64_t)nodes.size(),(int64_t)i));
-    children[i]->iterAllUniquePositionsHelper(*copy,*histCopy,nextPla,rules,xSize,ySize,sampleBuf,initialTurnNumber,uniqueHashes,hashComments,variationTraceNodesBranch,f);
+    children[i]->iterAllUniquePositionsHelper(
+      *copy,*histCopy,nextPla,rules,xSize,ySize,sampleBuf,initialTurnNumber,uniqueHashes,hashComments,hashParent,flipIfPassOrWFirst,rand,variationTraceNodesBranch,f
+    );
     assert(variationTraceNodesBranch.size() > 0);
     variationTraceNodesBranch.erase(variationTraceNodesBranch.begin()+(variationTraceNodesBranch.size()-1));
   }
@@ -691,6 +731,8 @@ void Sgf::samplePositionIfUniqueHelper(
   int initialTurnNumber,
   std::set<Hash128>& uniqueHashes,
   bool hashComments,
+  bool hashParent,
+  bool flipIfPassOrWFirst,
   const std::string& comments,
   std::function<void(PositionSample&,const BoardHistory&,const std::string&)> f
 ) const {
@@ -711,6 +753,19 @@ void Sgf::samplePositionIfUniqueHelper(
 
   if(hashComments)
     situationHash.hash0 += Hash::simpleHash(comments.c_str());
+
+  if(hashParent) {
+    Hash128 parentHash = Hash128();
+    if(hist.moveHistory.size() > 0) {
+      const Board& prevBoard = hist.getRecentBoard(1);
+      parentHash = prevBoard.pos_hash;
+      if(prevBoard.ko_loc != Board::NULL_LOC)
+        parentHash ^= Board::ZOBRIST_KO_LOC_HASH[prevBoard.ko_loc];
+    }
+    //Mix in a blended up hash of the previous board state to avoid zobrist cancellation, also swapping halves
+    Hash128 mixed = Hash128(Hash::murmurMix(parentHash.hash1),Hash::splitMix64(parentHash.hash0));
+    situationHash ^= mixed;
+  }
 
   if(contains(uniqueHashes,situationHash))
     return;
@@ -745,6 +800,12 @@ void Sgf::samplePositionIfUniqueHelper(
   sampleBuf.initialTurnNumber = initialTurnNumber + startTurnIdx;
   sampleBuf.hintLoc = Board::NULL_LOC;
   sampleBuf.weight = 1.0;
+
+  if(flipIfPassOrWFirst) {
+    if(hist.hasBlackPassOrWhiteFirst())
+      sampleBuf = sampleBuf.getColorFlipped();
+  }
+
   f(sampleBuf,hist,comments);
 }
 
@@ -771,7 +832,7 @@ set<Hash128> Sgf::readExcludes(const vector<string>& files) {
     string excludeHashesFile = Global::trim(files[i]);
     if(excludeHashesFile.size() <= 0)
       continue;
-    vector<string> hashes = Global::readFileLines(excludeHashesFile,'\n');
+    vector<string> hashes = FileUtils::readFileLines(excludeHashesFile,'\n');
     for(int64_t j = 0; j < hashes.size(); j++) {
       const string& hash128 = Global::trim(Global::stripComments(hashes[j]));
       if(hash128.length() <= 0)
@@ -842,6 +903,24 @@ Sgf::PositionSample Sgf::PositionSample::ofJsonLine(const string& s) {
     throw StringError("Error parsing position sample json\n" + s + "\n" + e.what());
   }
   return sample;
+}
+
+Sgf::PositionSample Sgf::PositionSample::getColorFlipped() const {
+  Sgf::PositionSample other = *this;
+  Board newBoard(other.board.x_size,other.board.y_size);
+  for(int y = 0; y < other.board.y_size; y++) {
+    for(int x = 0; x < other.board.x_size; x++) {
+      Loc loc = Location::getLoc(x,y,other.board.x_size);
+      if(other.board.colors[loc] == C_BLACK || other.board.colors[loc] == C_WHITE)
+        newBoard.setStone(loc, getOpp(other.board.colors[loc]));
+    }
+  }
+  other.board = newBoard;
+  other.nextPla = getOpp(other.nextPla);
+  for(int i = 0; i<other.moves.size(); i++)
+    other.moves[i].pla = getOpp(other.moves[i].pla);
+
+  return other;
 }
 
 bool Sgf::PositionSample::isEqualForTesting(const Sgf::PositionSample& other, bool checkNumCaptures, bool checkSimpleKo) const {
@@ -1068,7 +1147,7 @@ Sgf* Sgf::parse(const string& str) {
 }
 
 Sgf* Sgf::loadFile(const string& file) {
-  Sgf* sgf = parse(Global::readFile(file));
+  Sgf* sgf = parse(FileUtils::readFile(file));
   if(sgf != NULL)
     sgf->fileName = file;
   return sgf;
@@ -1100,7 +1179,7 @@ vector<Sgf*> Sgf::loadFiles(const vector<string>& files) {
 
 vector<Sgf*> Sgf::loadSgfsFile(const string& file) {
   vector<Sgf*> sgfs;
-  vector<string> lines = Global::readFileLines(file,'\n');
+  vector<string> lines = FileUtils::readFileLines(file,'\n');
   try {
     for(size_t i = 0; i<lines.size(); i++) {
       string line = Global::trim(lines[i]);

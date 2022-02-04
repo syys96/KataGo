@@ -1,6 +1,7 @@
 #include "../core/logger.h"
 
 #include "../core/datetime.h"
+#include "../core/fileutils.h"
 
 using namespace std;
 
@@ -40,8 +41,20 @@ void Logger::addOStream(ostream& out) {
   ostreams.push_back(&out);
 }
 void Logger::addFile(const string& file) {
-  if(file != "")
-    files.push_back(new ofstream(file, ofstream::app));
+  if(file == "")
+    return;
+  ofstream* out = new ofstream();
+  try {
+    FileUtils::open(*out, file, ofstream::app);
+  }
+  catch(const StringError& e) {
+    write(string("WARNING: could not open file for logging: ") + e.what());
+    cerr << "WARNING: could not open file for logging: " << e.what() << endl;
+    out->close();
+    delete out;
+    return;
+  }
+  files.push_back(out);
 }
 
 void Logger::write(const string& str, bool endLine) {

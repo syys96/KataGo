@@ -18,11 +18,26 @@ struct SearchParams {
   double cpuctExploration;  //Constant factor on exploration, should also scale up linearly with magnitude of utility
   double cpuctExplorationLog; //Constant factor on log-scaling exploration, should also scale up linearly with magnitude of utility
   double cpuctExplorationBase; //Scale of number of visits at which log behavior starts having an effect
+
+  double cpuctUtilityStdevPrior;
+  double cpuctUtilityStdevPriorWeight;
+  double cpuctUtilityStdevScale;
+
   double fpuReductionMax;   //Max amount to reduce fpu value for unexplore children
   double fpuLossProp; //Scale fpu this proportion of the way towards assuming a move is a loss.
   double fpuParentWeight; //For fpu, 0 = use parent average, 1 = use parent nn value, interpolates between.
-  double parentValueWeightFactor; //Scale the parent weight by this much relative to children in mcts
+
+  //Tree value aggregation parameters
   double valueWeightExponent; //Amount to apply a downweighting of children with very bad values relative to good ones
+  bool useNoisePruning; //For computation of value, prune out weight that greatly exceeds what is justified by policy prior
+  double noisePruneUtilityScale; //The scale of the utility difference at which useNoisePruning has effect
+  double noisePruningCap; //Maximum amount of weight that noisePruning can remove
+
+  //Uncertainty weighting
+  bool useUncertainty; //Weight visits by uncertainty
+  double uncertaintyCoeff; //The amount of visits weight that an uncertainty of 1 utility is.
+  double uncertaintyExponent; //Visits weight scales inversely with this power of the uncertainty
+  double uncertaintyMaxWeight; //Add minimum uncertainty so that the most weight a node can have is this
 
   //Root parameters
   bool rootNoiseEnabled;
@@ -34,7 +49,7 @@ struct SearchParams {
   double rootFpuReductionMax; //Same as fpuReductionMax, but at root
   double rootFpuLossProp; //Same as fpuLossProp, but at root
   int rootNumSymmetriesToSample; //For the root node, sample this many random symmetries (WITHOUT replacement) and average the results together.
-
+  bool rootSymmetryPruning; //For the root node, search only one copy of each symmetrically equivalent move.
   //We use the min of these two together, and also excess visits get pruned if the value turns out bad.
   double rootDesiredPerChildVisitsCoeff; //Funnel sqrt(this * policy prob * total visits) down any given child that receives any visits at all at the root
 
@@ -61,6 +76,8 @@ struct SearchParams {
   double playoutDoublingAdvantage; //Play as if we have this many doublings of playouts vs the opponent
   Player playoutDoublingAdvantagePla; //Negate playoutDoublingAdvantage when making a move for the opponent of this player. If empty, opponent of the root player.
 
+  double avoidRepeatedPatternUtility; //Have the root player avoid repeating similar shapes, penalizing this much utility per instance.
+
   float nnPolicyTemperature; //Scale neural net policy probabilities by this temperature, applies everywhere in the tree
   bool antiMirror; //Enable anti-mirroring logic
 
@@ -71,7 +88,7 @@ struct SearchParams {
 
   //Threading-related
   uint32_t mutexPoolSize; //Size of mutex pool for synchronizing access to all search nodes
-  int32_t numVirtualLossesPerThread; //Number of virtual losses for one thread to add
+  double numVirtualLossesPerThread; //Number of virtual losses for one thread to add
 
   //Asyncbot
   int numThreads; //Number of threads

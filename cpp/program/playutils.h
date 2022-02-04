@@ -22,13 +22,20 @@ namespace PlayUtils {
   //Set board to empty and place fixed handicap stones, raising an exception if invalid
   void placeFixedHandicap(Board& board, int n);
 
+  ExtraBlackAndKomi chooseExtraBlackAndKomi(
+    float base, float stdev, double allowIntegerProb,
+    double handicapProb, int numExtraBlackFixed,
+    double bigStdevProb, float bigStdev, double sqrtBoardArea, Rand& rand
+  );
+  void setKomiWithoutNoise(const ExtraBlackAndKomi& extraBlackAndKomi, BoardHistory& hist); //Also ignores allowInteger
+  void setKomiWithNoise(const ExtraBlackAndKomi& extraBlackAndKomi, BoardHistory& hist, Rand& rand);
+
   ReportedSearchValues getWhiteScoreValues(
     Search* bot,
     const Board& board,
     const BoardHistory& hist,
     Player pla,
     int64_t numVisits,
-    Logger& logger,
     const OtherGameProperties& otherGameProps
   );
 
@@ -46,6 +53,16 @@ namespace PlayUtils {
     Loc banMove
   );
 
+  Loc getGameInitializationMove(
+    Search* botB, Search* botW, Board& board, const BoardHistory& hist, Player pla, NNResultBuf& buf,
+    Rand& gameRand, double temperature
+  );
+  void initializeGameUsingPolicy(
+    Search* botB, Search* botW, Board& board, BoardHistory& hist, Player& pla,
+    Rand& gameRand, bool doEndGameIfAllPassAlive,
+    double proportionOfBoardArea, double temperature
+  );
+
   float roundAndClipKomi(double unrounded, const Board& board, bool looseClipping);
 
   void adjustKomiToEven(
@@ -55,7 +72,6 @@ namespace PlayUtils {
     BoardHistory& hist,
     Player pla,
     int64_t numVisits,
-    Logger& logger,
     const OtherGameProperties& otherGameProps,
     Rand& rand
   );
@@ -68,7 +84,6 @@ namespace PlayUtils {
     BoardHistory& hist,
     Player pla,
     int64_t numVisits,
-    Logger& logger,
     const OtherGameProperties& otherGameProps
   );
 
@@ -87,8 +102,7 @@ namespace PlayUtils {
     const Board& board,
     const BoardHistory& hist,
     Player pla,
-    int64_t numVisits,
-    Logger& logger
+    int64_t numVisits
   );
 
   //Determine all living and dead stones, if the game were terminated right now and
@@ -108,7 +122,6 @@ namespace PlayUtils {
     const BoardHistory& hist,
     Player pla,
     int64_t numVisits,
-    Logger& logger,
     std::vector<double>& ownershipsBuf
   );
 
@@ -138,7 +151,6 @@ namespace PlayUtils {
     const CompactSgf* sgf,
     int numPositionsToUse,
     NNEvaluator* nnEval,
-    Logger& logger,
     const BenchmarkResults* baseline,
     double secondsPerGameMove,
     bool printElo
@@ -162,8 +174,7 @@ namespace PlayUtils {
     const Player pla,
     Loc moveLoc,
     Search* bot,
-    int64_t numVisits,
-    Logger& logger
+    int64_t numVisits
   );
 
 }

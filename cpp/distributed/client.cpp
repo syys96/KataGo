@@ -3,6 +3,7 @@
 #include "../distributed/client.h"
 
 #include "../core/config_parser.h"
+#include "../core/fileutils.h"
 #include "../core/sha2.h"
 #include "../core/timer.h"
 #include "../core/os.h"
@@ -329,7 +330,7 @@ Connection::Connection(
   }
   else {
     if(caCertsFile != "" && caCertsFile != "/dev/null") {
-      string contents = Global::readFile(caCertsFile);
+      string contents = FileUtils::readFile(caCertsFile);
       if(contents.find("-----BEGIN CERTIFICATE-----") == string::npos) {
         logger->write("WARNING: " + caCertsFile + " does not seem to contain pem-formatted certs. Are you sure this is the correct file?");
       }
@@ -454,7 +455,11 @@ httplib::Result Connection::post(const string& subPath, const string& data, cons
 
 httplib::Result Connection::postMulti(const string& subPath, const httplib::MultipartFormDataItems& data) {
   string queryPath = concatPaths(baseResourcePath,subPath);
-  string boundary = "___" + Global::uint64ToHexString(rand.nextUInt64()) + Global::uint64ToHexString(rand.nextUInt64()) + Global::uint64ToHexString(rand.nextUInt64());
+  string boundary;
+  {
+    std::lock_guard<std::mutex> lock(randMutex);
+    boundary = "___" + Global::uint64ToHexString(rand.nextUInt64()) + Global::uint64ToHexString(rand.nextUInt64()) + Global::uint64ToHexString(rand.nextUInt64());
+  }
 
   std::lock_guard<std::mutex> lock(mutex);
   if(isSSL) {
@@ -628,7 +633,11 @@ bool Connection::retryLoop(const char* errorLabel, int maxTries, std::function<b
         logger->write(string("Error was:\n") + e.what());
       }
 
-      double intervalRemaining = failureInterval * (0.95 + rand.nextDouble(0.1));
+      double intervalRemaining;
+      {
+        std::lock_guard<std::mutex> lock(randMutex);
+        intervalRemaining = failureInterval * (0.95 + rand.nextDouble(0.1));
+      }
       while(intervalRemaining > 0.0) {
         double sleepTime = std::min(intervalRemaining, stopPollFrequency);
         if(shouldStop())
@@ -677,7 +686,7 @@ bool Connection::getNextTask(
 
     while(true) {
       httplib::MultipartFormDataItems items = {
-        { "git_revision", Version::getGitRevision(), "", "" },
+        { "git_revision", Version::getGitRevisionWithBackend(), "", "" },
         { "client_instance_id", clientInstanceId, "", "" },
         { "task_rep_factor", Global::intToString(taskRepFactor), "", ""},
         { "allow_selfplay_task", (allowSelfplayTask ? "true" : "false"), "", ""},
@@ -790,8 +799,11 @@ string Connection::getTmpModelPath(const Client::ModelInfo& modelInfo, const str
   static const char* chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
   uint32_t len = (uint32_t)std::strlen(chars);
   string randStr;
-  for(int i = 0; i<10; i++)
-    randStr += chars[rand.nextUInt(len)];
+  {
+    std::lock_guard<std::mutex> lock(randMutex);
+    for(int i = 0; i<10; i++)
+      randStr += chars[rand.nextUInt(len)];
+  }
   if(Global::isSuffix(modelInfo.downloadUrl,".txt.gz"))
     return modelDir + "/" + modelInfo.name + ".tmp." + randStr + ".txt.gz";
   return modelDir + "/" + modelInfo.name + ".tmp." + randStr + ".bin.gz";
@@ -800,7 +812,7 @@ string Connection::getTmpModelPath(const Client::ModelInfo& modelInfo, const str
 void Client::ModelInfo::failIfSha256Mismatch(const string& modelPath) const {
   if(isRandom)
     return;
-  string contents = Global::readFileBinary(modelPath);
+  string contents = FileUtils::readFileBinary(modelPath);
   char hashResultBuf[65];
   SHA2::get256((const uint8_t*)contents.data(), contents.size(), hashResultBuf);
   string hashResult(hashResultBuf);
@@ -928,7 +940,8 @@ bool Connection::actuallyDownloadModel(
     (void)outerLoopFailMode;
 
     const string tmpPath = getTmpModelPath(modelInfo,modelDir);
-    ofstream out(tmpPath,ios::binary);
+    ofstream out;
+    FileUtils::open(out,tmpPath,ios::binary);
 
     ClockTimer timer;
     double lastTime = timer.getSeconds();
@@ -1036,14 +1049,14 @@ bool Connection::uploadTrainingGameAndData(
   const Task& task, const FinishedGameData* gameData, const string& sgfFilePath, const string& npzFilePath, const int64_t numDataRows,
   bool retryOnFailure, std::function<bool()> shouldStop
 ) {
-  ifstream sgfIn(sgfFilePath);
-  if(!sgfIn.good())
+  ifstream sgfIn;
+  if(!FileUtils::tryOpen(sgfIn,sgfFilePath))
     throw IOError(string("Error: sgf file was deleted or wasn't written out for upload?") + sgfFilePath);
   string sgfContents((istreambuf_iterator<char>(sgfIn)), istreambuf_iterator<char>());
   sgfIn.close();
 
-  ifstream npzIn(npzFilePath,ios::in|ios::binary);
-  if(!npzIn.good())
+  ifstream npzIn;
+  if(!FileUtils::tryOpen(npzIn,npzFilePath,ios::in|ios::binary))
     throw IOError(string("Error: npz file was deleted or wasn't written out for upload?") + npzFilePath);
   string npzContents((istreambuf_iterator<char>(npzIn)), istreambuf_iterator<char>());
   npzIn.close();
@@ -1123,8 +1136,8 @@ bool Connection::uploadRatingGame(
   const Task& task, const FinishedGameData* gameData, const string& sgfFilePath,
   bool retryOnFailure, std::function<bool()> shouldStop
 ) {
-  ifstream sgfIn(sgfFilePath);
-  if(!sgfIn.good())
+  ifstream sgfIn;
+  if(!FileUtils::tryOpen(sgfIn,sgfFilePath))
     throw IOError(string("Error: sgf file was deleted or wasn't written out for upload?") + sgfFilePath);
   string sgfContents((istreambuf_iterator<char>(sgfIn)), istreambuf_iterator<char>());
   sgfIn.close();

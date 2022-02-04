@@ -1,5 +1,6 @@
 #include "../core/global.h"
 #include "../core/config_parser.h"
+#include "../core/fileutils.h"
 #include "../core/timer.h"
 #include "../core/datetime.h"
 #include "../core/makedir.h"
@@ -8,6 +9,7 @@
 #include "../program/setup.h"
 #include "../program/playutils.h"
 #include "../program/play.h"
+#include "../tests/tests.h"
 #include "../command/commandline.h"
 #include "../main.h"
 
@@ -85,6 +87,7 @@ static const vector<string> knownCommands = {
   //Misc other stuff
   "cputime",
   "gomill-cpu_time",
+  "benchmark",
 
   //Some debug commands
   "kata-debug-print-tc",
@@ -95,6 +98,17 @@ static const vector<string> knownCommands = {
 
 static bool tryParseLoc(const string& s, const Board& b, Loc& loc) {
   return Location::tryOfString(s,b,loc);
+}
+
+//Filter out all double newlines, since double newline terminates GTP command responses
+static string filterDoubleNewlines(const string& s) {
+  string filtered;
+  for(int i = 0; i<s.length(); i++) {
+    if(i > 0 && s[i-1] == '\n' && s[i] == '\n')
+      continue;
+    filtered += s[i];
+  }
+  return filtered;
 }
 
 static bool timeIsValid(const double& time) {
@@ -161,6 +175,13 @@ static double initialBlackAdvantage(const BoardHistory& hist) {
   return stoneValue * extraBlackStones + (7.0 - hist.rules.komi - whiteHandicapBonus);
 }
 
+static double getBoardSizeScaling(const Board& board) {
+  return pow(19.0 * 19.0 / (double)(board.x_size * board.y_size), 0.75);
+}
+static double getPointsThresholdForHandicapGame(double boardSizeScaling) {
+  return std::max(4.0 / boardSizeScaling, 2.0);
+}
+
 static bool noWhiteStonesOnBoard(const Board& board) {
   for(int y = 0; y < board.y_size; y++) {
     for(int x = 0; x < board.x_size; x++) {
@@ -183,8 +204,8 @@ static void updateDynamicPDAHelper(
     desiredDynamicPDAForWhite = 0.0;
   }
   else {
-    double boardSizeScaling = pow(19.0 * 19.0 / (double)(board.x_size * board.y_size), 0.75);
-    double pdaScalingStartPoints = std::max(4.0 / boardSizeScaling, 2.0);
+    double boardSizeScaling = getBoardSizeScaling(board);
+    double pdaScalingStartPoints = getPointsThresholdForHandicapGame(boardSizeScaling);
     double initialBlackAdvantageInPoints = initialBlackAdvantage(hist);
     Player disadvantagedPla = initialBlackAdvantageInPoints >= 0 ? P_WHITE : P_BLACK;
     double initialAdvantageInPoints = abs(initialBlackAdvantageInPoints);
@@ -307,6 +328,9 @@ struct GTPEngine {
   const double dynamicPlayoutDoublingAdvantageCapPerOppLead;
   double staticPlayoutDoublingAdvantage;
   bool staticPDATakesPrecedence;
+  double normalAvoidRepeatedPatternUtility;
+  double handicapAvoidRepeatedPatternUtility;
+
   double genmoveWideRootNoise;
   double analysisWideRootNoise;
   bool genmoveAntiMirror;
@@ -332,6 +356,7 @@ struct GTPEngine {
   double lastSearchFactor;
   double desiredDynamicPDAForWhite;
   bool avoidMYTDaggerHack;
+  std::unique_ptr<PatternBonusTable> patternBonusTable;
 
   Player perspective;
 
@@ -341,10 +366,12 @@ struct GTPEngine {
     const string& modelFile, SearchParams initialParams, Rules initialRules,
     bool assumeMultiBlackHandicap, bool prevtEncore,
     double dynamicPDACapPerOppLead, double staticPDA, bool staticPDAPrecedence,
+    double normAvoidRepeatedPatternUtility, double hcapAvoidRepeatedPatternUtility,
     bool avoidDagger,
     double genmoveWRN, double analysisWRN,
     bool genmoveAntiMir, bool analysisAntiMir,
-    Player persp, int pvLen
+    Player persp, int pvLen,
+    std::unique_ptr<PatternBonusTable>&& pbTable
   )
     :nnModelFile(modelFile),
      assumeMultipleStartingBlackMovesAreHandicap(assumeMultiBlackHandicap),
@@ -353,6 +380,8 @@ struct GTPEngine {
      dynamicPlayoutDoublingAdvantageCapPerOppLead(dynamicPDACapPerOppLead),
      staticPlayoutDoublingAdvantage(staticPDA),
      staticPDATakesPrecedence(staticPDAPrecedence),
+     normalAvoidRepeatedPatternUtility(normAvoidRepeatedPatternUtility),
+     handicapAvoidRepeatedPatternUtility(hcapAvoidRepeatedPatternUtility),
      genmoveWideRootNoise(genmoveWRN),
      analysisWideRootNoise(analysisWRN),
      genmoveAntiMirror(genmoveAntiMir),
@@ -370,6 +399,7 @@ struct GTPEngine {
      lastSearchFactor(1.0),
      desiredDynamicPDAForWhite(0.0),
      avoidMYTDaggerHack(avoidDagger),
+     patternBonusTable(std::move(pbTable)),
      perspective(persp),
      genmoveTimeSum(0.0)
   {
@@ -394,7 +424,7 @@ struct GTPEngine {
   }
 
   //Specify -1 for the sizes for a default
-  void setOrResetBoardSize(ConfigParser& cfg, Logger& logger, Rand& seedRand, int boardXSize, int boardYSize) {
+  void setOrResetBoardSize(ConfigParser& cfg, Logger& logger, Rand& seedRand, int boardXSize, int boardYSize, bool loggingToStderr) {
     if(nnEval != NULL && boardXSize == nnEval->getNNXLen() && boardYSize == nnEval->getNNYLen())
       return;
     if(nnEval != NULL) {
@@ -409,18 +439,19 @@ struct GTPEngine {
 
     bool wasDefault = false;
     if(boardXSize == -1 || boardYSize == -1) {
-      boardXSize = 19;
-      boardYSize = 19;
+      boardXSize = Board::DEFAULT_LEN;
+      boardYSize = Board::DEFAULT_LEN;
       wasDefault = true;
     }
 
-    int maxConcurrentEvals = params.numThreads * 2 + 16; // * 2 + 16 just to give plenty of headroom
-    int expectedConcurrentEvals = params.numThreads;
-    int defaultMaxBatchSize = std::max(8,((params.numThreads+3)/4)*4);
-    string expectedSha256 = "";
+    const int maxConcurrentEvals = params.numThreads * 2 + 16; // * 2 + 16 just to give plenty of headroom
+    const int expectedConcurrentEvals = params.numThreads;
+    const int defaultMaxBatchSize = std::max(8,((params.numThreads+3)/4)*4);
+    const bool defaultRequireExactNNLen = true;
+    const string expectedSha256 = "";
     nnEval = Setup::initializeNNEvaluator(
       nnModelFile,nnModelFile,expectedSha256,cfg,logger,seedRand,maxConcurrentEvals,expectedConcurrentEvals,
-      boardXSize,boardYSize,defaultMaxBatchSize,
+      boardXSize,boardYSize,defaultMaxBatchSize,defaultRequireExactNNLen,
       Setup::SETUP_FOR_GTP
     );
     logger.write("Loaded neural net with nnXLen " + Global::intToString(nnEval->getNNXLen()) + " nnYLen " + Global::intToString(nnEval->getNNYLen()));
@@ -439,6 +470,9 @@ struct GTPEngine {
       boardXSize = nnEval->getNNXLen();
       boardYSize = nnEval->getNNYLen();
     }
+    logger.write("Initializing board with boardXSize " + Global::intToString(boardXSize) + " boardYSize " + Global::intToString(boardYSize));
+    if(!loggingToStderr)
+      cerr << ("Initializing board with boardXSize " + Global::intToString(boardXSize) + " boardYSize " + Global::intToString(boardYSize)) << endl;
 
     string searchRandSeed;
     if(cfg.contains("searchRandSeed"))
@@ -447,6 +481,7 @@ struct GTPEngine {
       searchRandSeed = Global::uint64ToString(seedRand.nextUInt64());
 
     bot = new AsyncBot(params, nnEval, &logger, searchRandSeed);
+    bot->setCopyOfExternalPatternBonusTable(patternBonusTable);
 
     Board board(boardXSize,boardYSize);
     Player pla = P_BLACK;
@@ -622,11 +657,23 @@ struct GTPEngine {
     int minMoves = 0;
     int maxMoves = 10000000;
     bool showOwnership = false;
+    bool showOwnershipStdev = false;
     bool showPVVisits = false;
     double secondsPerReport = TimeControls::UNLIMITED_TIME_DEFAULT;
     vector<int> avoidMoveUntilByLocBlack;
     vector<int> avoidMoveUntilByLocWhite;
   };
+
+  void filterZeroVisitMoves(const AnalyzeArgs& args, vector<AnalysisData> buf) {
+    //Avoid printing moves that have 0 visits, unless we need them
+    //These should already be sorted so that 0-visit moves only appear at the end.
+    int keptMoves = 0;
+    for(int i = 0; i<buf.size(); i++) {
+      if(buf[i].numVisits > 0 || keptMoves < args.minMoves)
+        buf[keptMoves++] = buf[i];
+    }
+    buf.resize(keptMoves);
+  }
 
   std::function<void(const Search* search)> getAnalyzeCallback(Player pla, AnalyzeArgs args) {
     std::function<void(const Search* search)> callback;
@@ -636,7 +683,9 @@ struct GTPEngine {
       //asynchronously and called after we return
       callback = [args,pla,this](const Search* search) {
         vector<AnalysisData> buf;
-        search->getAnalysisData(buf,args.minMoves,false,analysisPVLen);
+        bool duplicateForSymmetries = true;
+        search->getAnalysisData(buf,args.minMoves,false,analysisPVLen,duplicateForSymmetries);
+        filterZeroVisitMoves(args,buf);
         if(buf.size() > args.maxMoves)
           buf.resize(args.maxMoves);
         if(buf.size() <= 0)
@@ -680,14 +729,23 @@ struct GTPEngine {
     else {
       callback = [args,pla,this](const Search* search) {
         vector<AnalysisData> buf;
-        search->getAnalysisData(buf,args.minMoves,false,analysisPVLen);
+        bool duplicateForSymmetries = true;
+        search->getAnalysisData(buf,args.minMoves,false,analysisPVLen,duplicateForSymmetries);
+        filterZeroVisitMoves(args,buf);
         if(buf.size() > args.maxMoves)
           buf.resize(args.maxMoves);
         if(buf.size() <= 0)
           return;
 
-        vector<double> ownership;
-        if(args.showOwnership) {
+        vector<double> ownership, ownershipStdev;
+        if(args.showOwnershipStdev) {
+          static constexpr int64_t ownershipStdevMinVisits = 3;
+          tuple<vector<double>,vector<double>> ownershipAverageAndStdev;
+          ownershipAverageAndStdev = search->getAverageAndStandardDeviationTreeOwnership(ownershipStdevMinVisits);
+          ownership = std::get<0>(ownershipAverageAndStdev);
+          ownershipStdev = std::get<1>(ownershipAverageAndStdev);
+        }
+        else if(args.showOwnership) {
           static constexpr int64_t ownershipMinVisits = 3;
           ownership = search->getAverageTreeOwnership(ownershipMinVisits);
         }
@@ -732,6 +790,8 @@ struct GTPEngine {
           out << " prior " << data.policyPrior;
           out << " lcb " << lcb;
           out << " utilityLcb " << utilityLcb;
+          if(data.isSymmetryOf != Board::NULL_LOC)
+            out << " isSymmetryOf " << Location::toString(data.isSymmetryOf,board);
           out << " order " << data.order;
           out << " pv ";
           if(preventEncore && data.pvContainsPass())
@@ -759,6 +819,19 @@ struct GTPEngine {
                 out << " " << -ownership[pos];
               else
                 out << " " << ownership[pos];
+            }
+          }
+        }
+
+        if(args.showOwnershipStdev) {
+          out << " ";
+
+          out << "ownershipStdev";
+          int nnXLen = search->nnXLen;
+          for(int y = 0; y<board.y_size; y++) {
+            for(int x = 0; x<board.x_size; x++) {
+              int pos = NNPos::xyToPos(x,y,nnXLen);
+              out << " " << ownershipStdev[pos];
             }
           }
         }
@@ -823,6 +896,19 @@ struct GTPEngine {
       bot->setParams(params);
     }
 
+    {
+      double avoidRepeatedPatternUtility = normalAvoidRepeatedPatternUtility;
+      if(!args.analyzing) {
+        double initialOppAdvantage = initialBlackAdvantage(bot->getRootHist()) * (pla == P_WHITE ? 1 : -1);
+        if(initialOppAdvantage > getPointsThresholdForHandicapGame(getBoardSizeScaling(bot->getRootBoard())))
+          avoidRepeatedPatternUtility = handicapAvoidRepeatedPatternUtility;
+      }
+      if(params.avoidRepeatedPatternUtility != avoidRepeatedPatternUtility) {
+        params.avoidRepeatedPatternUtility = avoidRepeatedPatternUtility;
+        bot->setParams(params);
+      }
+    }
+
     //Play faster when winning
     double searchFactor = PlayUtils::getSearchFactor(searchFactorWhenWinningThreshold,searchFactorWhenWinning,params,recentWinLossValues,pla);
     lastSearchFactor = searchFactor;
@@ -831,7 +917,7 @@ struct GTPEngine {
     bot->setAvoidMoveUntilByLoc(args.avoidMoveUntilByLocBlack,args.avoidMoveUntilByLocWhite);
     if(args.analyzing) {
       std::function<void(const Search* search)> callback = getAnalyzeCallback(pla,args);
-      if(args.showOwnership)
+      if(args.showOwnership || args.showOwnershipStdev)
         bot->setAlwaysIncludeOwnerMap(true);
       else
         bot->setAlwaysIncludeOwnerMap(false);
@@ -924,7 +1010,7 @@ struct GTPEngine {
     //Implement friendly pass - in area scoring rules other than tromp-taylor, maybe pass once there are no points
     //left to gain.
     int64_t numVisitsForFriendlyPass = 8 + std::min((int64_t)1000, std::min(params.maxVisits, params.maxPlayouts) / 10);
-    moveLoc = PlayUtils::maybeFriendlyPass(cleanupBeforePass, friendlyPass, pla, moveLoc, bot->getSearchStopAndWait(), numVisitsForFriendlyPass, logger);
+    moveLoc = PlayUtils::maybeFriendlyPass(cleanupBeforePass, friendlyPass, pla, moveLoc, bot->getSearchStopAndWait(), numVisitsForFriendlyPass);
 
     //Implement cleanupBeforePass hack - if the bot wants to pass, instead cleanup if there is something to clean
     //and we are in a ruleset where this is necessary or the user has configured it.
@@ -1064,7 +1150,7 @@ struct GTPEngine {
 
     std::function<void(const Search* search)> callback = getAnalyzeCallback(pla,args);
     bot->setAvoidMoveUntilByLoc(args.avoidMoveUntilByLocBlack,args.avoidMoveUntilByLocWhite);
-    if(args.showOwnership)
+    if(args.showOwnership || args.showOwnershipStdev)
       bot->setAlwaysIncludeOwnerMap(true);
     else
       bot->setAlwaysIncludeOwnerMap(false);
@@ -1073,7 +1159,7 @@ struct GTPEngine {
     bot->analyzeAsync(pla, searchFactor, args.secondsPerReport, callback);
   }
 
-  void computeAnticipatedWinnerAndScore(Logger& logger, Player& winner, double& finalWhiteMinusBlackScore) {
+  void computeAnticipatedWinnerAndScore(Player& winner, double& finalWhiteMinusBlackScore) {
     stopAndWait();
 
     //No playoutDoublingAdvantage to avoid bias
@@ -1108,7 +1194,7 @@ struct GTPEngine {
     else {
       int64_t numVisits = std::max(50, params.numThreads * 10);
       //Try computing the lead for white
-      double lead = PlayUtils::computeLead(bot->getSearchStopAndWait(),NULL,board,hist,pla,numVisits,logger,OtherGameProperties());
+      double lead = PlayUtils::computeLead(bot->getSearchStopAndWait(),NULL,board,hist,pla,numVisits,OtherGameProperties());
 
       //Round lead to nearest integer or half-integer
       if(hist.rules.gameResultWillBeInteger())
@@ -1125,7 +1211,7 @@ struct GTPEngine {
     bot->setParams(params);
   }
 
-  vector<bool> computeAnticipatedStatuses(Logger& logger) {
+  vector<bool> computeAnticipatedStatuses() {
     stopAndWait();
 
     //Make absolutely sure we can restore the bot's old state
@@ -1149,7 +1235,7 @@ struct GTPEngine {
     //Human-friendly statuses or incomplete game status estimation
     else {
       vector<double> ownershipsBuf;
-      isAlive = PlayUtils::computeAnticipatedStatusesWithOwnership(bot->getSearchStopAndWait(),board,hist,pla,numVisits,logger,ownershipsBuf);
+      isAlive = PlayUtils::computeAnticipatedStatusesWithOwnership(bot->getSearchStopAndWait(),board,hist,pla,numVisits,ownershipsBuf);
     }
 
     //Restore
@@ -1163,7 +1249,7 @@ struct GTPEngine {
       return "";
     ostringstream out;
 
-    for(int symmetry = 0; symmetry < NNInputs::NUM_SYMMETRY_COMBINATIONS; symmetry++) {
+    for(int symmetry = 0; symmetry < SymmetryHelpers::NUM_SYMMETRIES; symmetry++) {
       if(whichSymmetry == NNInputs::SYMMETRY_ALL || whichSymmetry == symmetry) {
         Board board = bot->getRootBoard();
         BoardHistory hist = bot->getRootHist();
@@ -1257,6 +1343,7 @@ static GTPEngine::AnalyzeArgs parseAnalyzeCommand(
   int minMoves = 0;
   int maxMoves = 10000000;
   bool showOwnership = false;
+  bool showOwnershipStdev = false;
   bool showPVVisits = false;
   vector<int> avoidMoveUntilByLocBlack;
   vector<int> avoidMoveUntilByLocWhite;
@@ -1276,6 +1363,7 @@ static GTPEngine::AnalyzeArgs parseAnalyzeCommand(
   //minmoves <int min number of moves to show>
   //maxmoves <int max number of moves to show>
   //ownership <bool whether to show ownership or not>
+  //ownershipStdev <bool whether to show ownershipStdev or not>
   //pvVisits <bool whether to show pvVisits or not>
 
   //Parse optional player
@@ -1378,6 +1466,9 @@ static GTPEngine::AnalyzeArgs parseAnalyzeCommand(
     else if(isKata && key == "ownership" && Global::tryStringToBool(value,showOwnership)) {
       continue;
     }
+    else if(isKata && key == "ownershipStdev" && Global::tryStringToBool(value,showOwnershipStdev)) {
+      continue;
+    }
     else if(isKata && key == "pvVisits" && Global::tryStringToBool(value,showPVVisits)) {
       continue;
     }
@@ -1395,6 +1486,7 @@ static GTPEngine::AnalyzeArgs parseAnalyzeCommand(
   args.minMoves = minMoves;
   args.maxMoves = maxMoves;
   args.showOwnership = showOwnership;
+  args.showOwnershipStdev = showOwnershipStdev;
   args.showPVVisits = showPVVisits;
   args.avoidMoveUntilByLocBlack = avoidMoveUntilByLocBlack;
   args.avoidMoveUntilByLocWhite = avoidMoveUntilByLocWhite;
@@ -1402,7 +1494,7 @@ static GTPEngine::AnalyzeArgs parseAnalyzeCommand(
 }
 
 
-int MainCmds::gtp(int argc, const char* const* argv) {
+int MainCmds::gtp(const vector<string>& args) {
   Board::initHash();
   ScoreValue::initTables();
   Rand seedRand;
@@ -1419,7 +1511,7 @@ int MainCmds::gtp(int argc, const char* const* argv) {
 
     TCLAP::ValueArg<string> overrideVersionArg("","override-version","Force KataGo to say a certain value in response to gtp version command",false,string(),"VERSION");
     cmd.add(overrideVersionArg);
-    cmd.parse(argc,argv);
+    cmd.parseArgs(args);
     nnModelFile = cmd.getModelFile();
     overrideVersion = overrideVersionArg.getValue();
 
@@ -1466,7 +1558,8 @@ int MainCmds::gtp(int argc, const char* const* argv) {
   }
 
   //Defaults to 7.5 komi, gtp will generally override this
-  Rules initialRules = Setup::loadSingleRulesExceptForKomi(cfg);
+  const bool loadKomiFromCfg = false;
+  Rules initialRules = Setup::loadSingleRules(cfg,loadKomiFromCfg);
   logger.write("Using " + initialRules.toStringNoKomiMaybeNice() + " rules initially, unless GTP/GUI overrides this");
   if(startupPrintMessageToStderr && !loggingToStderr) {
     cerr << "Using " + initialRules.toStringNoKomiMaybeNice() + " rules initially, unless GTP/GUI overrides this" << endl;
@@ -1513,15 +1606,14 @@ int MainCmds::gtp(int argc, const char* const* argv) {
   double staticPlayoutDoublingAdvantage = initialParams.playoutDoublingAdvantage;
   const bool staticPDATakesPrecedence = cfg.contains("playoutDoublingAdvantage") && !cfg.contains("dynamicPlayoutDoublingAdvantageCapPerOppLead");
   const bool avoidMYTDaggerHack = cfg.contains("avoidMYTDaggerHack") ? cfg.getBool("avoidMYTDaggerHack") : false;
+  const double normalAvoidRepeatedPatternUtility = initialParams.avoidRepeatedPatternUtility;
+  const double handicapAvoidRepeatedPatternUtility = (cfg.contains("avoidRepeatedPatternUtility") || cfg.contains("avoidRepeatedPatternUtility0")) ?
+    initialParams.avoidRepeatedPatternUtility : 0.005;
 
-  const int defaultBoardXSize =
-    cfg.contains("defaultBoardXSize") ? cfg.getInt("defaultBoardXSize",2,Board::MAX_LEN) :
-    cfg.contains("defaultBoardSize") ? cfg.getInt("defaultBoardSize",2,Board::MAX_LEN) :
-    -1;
-  const int defaultBoardYSize =
-    cfg.contains("defaultBoardYSize") ? cfg.getInt("defaultBoardYSize",2,Board::MAX_LEN) :
-    cfg.contains("defaultBoardSize") ? cfg.getInt("defaultBoardSize",2,Board::MAX_LEN) :
-    -1;
+  int defaultBoardXSize = -1;
+  int defaultBoardYSize = -1;
+  Setup::loadDefaultBoardXYSize(cfg,logger,defaultBoardXSize,defaultBoardYSize);
+
   const bool forDeterministicTesting =
     cfg.contains("forDeterministicTesting") ? cfg.getBool("forDeterministicTesting") : false;
 
@@ -1530,10 +1622,17 @@ int MainCmds::gtp(int argc, const char* const* argv) {
 
   const double genmoveWideRootNoise = initialParams.wideRootNoise;
   const double analysisWideRootNoise =
-    cfg.contains("analysisWideRootNoise") ? cfg.getDouble("analysisWideRootNoise",0.0,5.0) : genmoveWideRootNoise;
-  const double analysisAntiMirror = initialParams.antiMirror;
-  const double genmoveAntiMirror =
+    cfg.contains("analysisWideRootNoise") ? cfg.getDouble("analysisWideRootNoise",0.0,5.0) : Setup::DEFAULT_ANALYSIS_WIDE_ROOT_NOISE;
+  const bool analysisAntiMirror = initialParams.antiMirror;
+  const bool genmoveAntiMirror =
     cfg.contains("genmoveAntiMirror") ? cfg.getBool("genmoveAntiMirror") : cfg.contains("antiMirror") ? cfg.getBool("antiMirror") : true;
+
+  std::unique_ptr<PatternBonusTable> patternBonusTable = nullptr;
+  {
+    std::vector<std::unique_ptr<PatternBonusTable>> tables = Setup::loadAvoidSgfPatternBonusTables(cfg,logger);
+    assert(tables.size() == 1);
+    patternBonusTable = std::move(tables[0]);
+  }
 
   Player perspective = Setup::parseReportAnalysisWinrates(cfg,C_EMPTY);
 
@@ -1542,12 +1641,14 @@ int MainCmds::gtp(int argc, const char* const* argv) {
     assumeMultipleStartingBlackMovesAreHandicap,preventEncore,
     dynamicPlayoutDoublingAdvantageCapPerOppLead,
     staticPlayoutDoublingAdvantage,staticPDATakesPrecedence,
+    normalAvoidRepeatedPatternUtility, handicapAvoidRepeatedPatternUtility,
     avoidMYTDaggerHack,
     genmoveWideRootNoise,analysisWideRootNoise,
     genmoveAntiMirror,analysisAntiMirror,
-    perspective,analysisPVLen
+    perspective,analysisPVLen,
+    std::move(patternBonusTable)
   );
-  engine->setOrResetBoardSize(cfg,logger,seedRand,defaultBoardXSize,defaultBoardYSize);
+  engine->setOrResetBoardSize(cfg,logger,seedRand,defaultBoardXSize,defaultBoardYSize,loggingToStderr);
 
   //If nobody specified any time limit in any way, then assume a relatively fast time control
   if(!cfg.contains("maxPlayouts") && !cfg.contains("maxVisits") && !cfg.contains("maxTime")) {
@@ -1732,7 +1833,7 @@ int MainCmds::gtp(int argc, const char* const* argv) {
         response = Global::strprintf("unacceptable size (Board::MAX_LEN is %d, consider increasing and recompiling)",(int)Board::MAX_LEN);
       }
       else {
-        engine->setOrResetBoardSize(cfg,logger,seedRand,newXSize,newYSize);
+        engine->setOrResetBoardSize(cfg,logger,seedRand,newXSize,newYSize,loggingToStderr);
       }
     }
 
@@ -2312,7 +2413,7 @@ int MainCmds::gtp(int argc, const char* const* argv) {
     else if(command == "genmove_analyze" || command == "lz-genmove_analyze" || command == "kata-genmove_analyze") {
       Player pla = engine->bot->getRootPla();
       bool parseFailed = false;
-      GTPEngine::AnalyzeArgs args = parseAnalyzeCommand(command, pieces, pla, parseFailed, engine);
+      GTPEngine::AnalyzeArgs analyzeArgs = parseAnalyzeCommand(command, pieces, pla, parseFailed, engine);
       if(parseFailed) {
         responseIsError = true;
         response = "Could not parse genmove_analyze arguments or arguments out of range: '" + Global::concat(pieces," ") + "'";
@@ -2334,7 +2435,7 @@ int MainCmds::gtp(int argc, const char* const* argv) {
           allowResignation,resignThreshold,resignConsecTurns,resignMinScoreDifference,
           logSearchInfo,debug,playChosenMove,
           response,responseIsError,maybeStartPondering,
-          args
+          analyzeArgs
         );
         //And manually handle the result as well. In case of error, don't report any play.
         suppressResponse = true;
@@ -2356,15 +2457,7 @@ int MainCmds::gtp(int argc, const char* const* argv) {
     else if(command == "showboard") {
       ostringstream sout;
       engine->bot->getRootHist().printBasicInfo(sout, engine->bot->getRootBoard());
-      //Filter out all double newlines, since double newline terminates GTP command responses
-      string s = sout.str();
-      string filtered;
-      for(int i = 0; i<s.length(); i++) {
-        if(i > 0 && s[i-1] == '\n' && s[i] == '\n')
-          continue;
-        filtered += s[i];
-      }
-      response = Global::trim(filtered);
+      response = Global::trim(filterDoubleNewlines(sout.str()));
     }
 
     else if(command == "fixed_handicap") {
@@ -2448,7 +2541,7 @@ int MainCmds::gtp(int argc, const char* const* argv) {
 
       Player winner = C_EMPTY;
       double finalWhiteMinusBlackScore = 0.0;
-      engine->computeAnticipatedWinnerAndScore(logger,winner,finalWhiteMinusBlackScore);
+      engine->computeAnticipatedWinnerAndScore(winner,finalWhiteMinusBlackScore);
 
       if(winner == C_EMPTY)
         response = "0";
@@ -2480,7 +2573,7 @@ int MainCmds::gtp(int argc, const char* const* argv) {
         }
 
         if(statusMode < 3) {
-          vector<bool> isAlive = engine->computeAnticipatedStatuses(logger);
+          vector<bool> isAlive = engine->computeAnticipatedStatuses();
           Board board = engine->bot->getRootBoard();
           vector<Loc> locsToReport;
 
@@ -2526,6 +2619,7 @@ int MainCmds::gtp(int argc, const char* const* argv) {
         int moveNumber = 0;
         if(pieces.size() == 2) {
           bool suc = Global::tryStringToInt(pieces[1],moveNumber);
+          moveNumber--;
           if(!suc || moveNumber < 0 || moveNumber > 10000000)
             parseFailed = true;
           else {
@@ -2621,6 +2715,7 @@ int MainCmds::gtp(int argc, const char* const* argv) {
               if(!loggingToStderr)
                 cerr << out.str() << endl;
             }
+            engine->setOrResetBoardSize(cfg,logger,seedRand,sgfBoard.x_size,sgfBoard.y_size,loggingToStderr);
             engine->setPositionAndRules(sgfNextPla, sgfBoard, sgfHist, sgfInitialBoard, sgfInitialNextPla, sgfHist.moveHistory);
           }
         }
@@ -2638,17 +2733,23 @@ int MainCmds::gtp(int argc, const char* const* argv) {
         response = out.str();
       }
       else {
-        ofstream out(pieces[0]);
-        WriteSgf::writeSgf(out,"","",engine->bot->getRootHist(),NULL,true,false);
-        out.close();
-        response = "";
+        ofstream out;
+        if(FileUtils::tryOpen(out,pieces[0])) {
+          WriteSgf::writeSgf(out,"","",engine->bot->getRootHist(),NULL,true,false);
+          out.close();
+          response = "";
+        }
+        else {
+          responseIsError = true;
+          response = "Could not open or write to file: " + pieces[0];
+        }
       }
     }
 
     else if(command == "analyze" || command == "lz-analyze" || command == "kata-analyze") {
       Player pla = engine->bot->getRootPla();
       bool parseFailed = false;
-      GTPEngine::AnalyzeArgs args = parseAnalyzeCommand(command, pieces, pla, parseFailed, engine);
+      GTPEngine::AnalyzeArgs analyzeArgs = parseAnalyzeCommand(command, pieces, pla, parseFailed, engine);
 
       if(parseFailed) {
         responseIsError = true;
@@ -2661,7 +2762,7 @@ int MainCmds::gtp(int argc, const char* const* argv) {
         else
           cout << "=" << endl;
 
-        engine->analyze(pla, args);
+        engine->analyze(pla, analyzeArgs);
 
         //No response - currentlyAnalyzing will make sure we get a newline at the appropriate time, when stopped.
         suppressResponse = true;
@@ -2676,7 +2777,7 @@ int MainCmds::gtp(int argc, const char* const* argv) {
         string s = Global::trim(Global::toLower(pieces[0]));
         if(s == "all")
           parsed = true;
-        else if(Global::tryStringToInt(s,whichSymmetry) && whichSymmetry >= 0 && whichSymmetry <= NNInputs::NUM_SYMMETRY_COMBINATIONS-1)
+        else if(Global::tryStringToInt(s,whichSymmetry) && whichSymmetry >= 0 && whichSymmetry <= SymmetryHelpers::NUM_SYMMETRIES-1)
           parsed = true;
       }
 
@@ -2689,9 +2790,114 @@ int MainCmds::gtp(int argc, const char* const* argv) {
       }
     }
 
+    else if(command == "debug_moves") {
+      PrintTreeOptions options;
+      options = options.maxDepth(1);
+      string printBranch;
+      for(size_t i = 0; i<pieces.size(); i++) {
+        if(i > 0)
+          printBranch += " ";
+        printBranch += pieces[i];
+      }
+      try {
+        if(printBranch.length() > 0)
+          options = options.onlyBranch(engine->bot->getRootBoard(),printBranch);
+      }
+      catch(const StringError& e) {
+        (void)e;
+        responseIsError = true;
+        response = "Invalid move sequence";
+      }
+      if(!responseIsError) {
+        Search* search = engine->bot->getSearchStopAndWait();
+        ostringstream sout;
 
+        Player pla = engine->bot->getRootPla();
+        Board board = engine->bot->getRootBoard();
+        BoardHistory hist = engine->bot->getRootHist();
+        bool allLegal = true;
+        for(Loc loc: options.branch_) {
+          bool suc = hist.makeBoardMoveTolerant(board, loc, pla, false);
+          if(!suc) {
+            allLegal = false;
+            break;
+          }
+          pla = getOpp(pla);
+        }
+        if(allLegal) {
+          Board::printBoard(sout, board, Board::NULL_LOC, &hist.moveHistory);
+        }
+        search->printTree(sout, search->rootNode, options, perspective);
+        response = filterDoubleNewlines(sout.str());
+      }
+    }
     else if(command == "cputime" || command == "gomill-cpu_time") {
       response = Global::doubleToString(engine->genmoveTimeSum);
+    }
+
+    else if(command == "benchmark") {
+      bool parsed = false;
+      int64_t numVisits = 0;
+      if(pieces.size() != 1) {
+        responseIsError = true;
+        response = "Expected one argument for benchmark but got '" + Global::concat(pieces," ") + "'";
+      }
+      else {
+        bool suc = Global::tryStringToInt64(pieces[0],numVisits);
+        if(!suc) {
+          responseIsError = true;
+          response = "Could not parse number of visits: " + pieces[0];
+        }
+        parsed = true;
+      }
+
+      if(parsed) {
+        engine->stopAndWait();
+
+        int boardSizeX = engine->bot->getRootBoard().x_size;
+        int boardSizeY = engine->bot->getRootBoard().y_size;
+        if(boardSizeX != boardSizeY) {
+          responseIsError = true;
+          response =
+            "Current board size is " + Global::intToString(boardSizeX) + "x" + Global::intToString(boardSizeY) +
+            ", no built-in benchmarks for rectangular boards";
+        }
+        else {
+          CompactSgf* sgf = NULL;
+          try {
+            string sgfData = TestCommon::getBenchmarkSGFData(boardSizeX);
+            sgf = CompactSgf::parse(sgfData);
+          }
+          catch(const StringError& e) {
+            responseIsError = true;
+            response = e.what();
+          }
+          if(sgf != NULL) {
+            const PlayUtils::BenchmarkResults* baseline = NULL;
+            const double secondsPerGameMove = 1.0;
+            const bool printElo = false;
+            SearchParams params = engine->getParams();
+            params.maxTime = 1.0e20;
+            params.maxPlayouts = ((int64_t)1) << 50;
+            params.maxVisits = numVisits;
+            PlayUtils::BenchmarkResults results = PlayUtils::benchmarkSearchOnPositionsAndPrint(
+              params,
+              sgf,
+              10,
+              engine->nnEval,
+              baseline,
+              secondsPerGameMove,
+              printElo
+            );
+            (void)results;
+            delete sgf;
+            //Act of benchmarking will write to stdout with a newline at the end, so we just need one more newline ourselves
+            //to complete GTP protocol.
+            suppressResponse = true;
+            cout << endl;
+          }
+        }
+      }
     }
 
     else if(command == "stop") {

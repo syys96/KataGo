@@ -24,16 +24,19 @@ class KataGoCommandLine : public TCLAP::CmdLine
 
   static std::string defaultGtpConfigFileName();
 
+  void parseArgs(const std::vector<std::string>& args);
+  
   //Args added AFTER calling this will only show up in the long help output, and not the short usage line.
   void setShortUsageArgLimit();
 
   void addModelFileArg();
   //Empty string indicates no default or no example
   void addConfigFileArg(const std::string& defaultConfigFileName, const std::string& exampleConfigFile);
+  void addConfigFileArg(const std::string& defaultConfigFileName, const std::string& exampleConfigFile, bool required);
   void addOverrideConfigArg();
 
   void logOverrides(Logger& logger) const;
-  
+
   std::string getModelFile() const;
   bool modelFileIsDefault() const;
   //cfg must be uninitialized, this will initialize it based on user-provided arguments

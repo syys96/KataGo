@@ -33,6 +33,7 @@ class ConfigParser {
   void initialize(std::istream& in);
   void initialize(const std::map<std::string, std::string>& kvs);
 
+  void overrideKey(const std::string& key, const std::string& value);
   void overrideKeys(const std::map<std::string, std::string>& newkvs);
   //mutexKeySets: For each pair of sets (A,B), if newkvs contains anything in A, erase every existing key that overlaps with B, and vice versa.
   void overrideKeys(const std::map<std::string, std::string>& newkvs, const std::vector<std::pair<std::set<std::string>,std::set<std::string>>>& mutexKeySets);
@@ -48,6 +49,9 @@ class ConfigParser {
   std::string getContents() const;
 
   bool contains(const std::string& key) const;
+  bool containsAny(const std::vector<std::string>& possibleKeys) const;
+  std::string firstFoundOrFail(const std::vector<std::string>& possibleKeys) const;
+  std::string firstFoundOrEmpty(const std::vector<std::string>& possibleKeys) const;
 
   std::string getString(const std::string& key);
   bool getBool(const std::string& key);
@@ -66,6 +70,7 @@ class ConfigParser {
   double getDouble(const std::string& key, double min, double max);
 
   std::vector<std::string> getStrings(const std::string& key);
+  std::vector<std::string> getStringsNonEmptyTrim(const std::string& key);
   std::vector<bool> getBools(const std::string& key);
   std::vector<int> getInts(const std::string& key);
   std::vector<int64_t> getInt64s(const std::string& key);

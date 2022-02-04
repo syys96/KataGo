@@ -161,6 +161,13 @@ struct BoardHistory {
   int computeNumHandicapStones() const;
   int computeWhiteHandicapBonus() const;
 
+  //Heuristically check if this history looks like an sgf variation where black passed to effectively
+  //turn into white, or similar.
+  bool hasBlackPassOrWhiteFirst() const;
+
+  //Compute a hash that takes into account the full situation, the rules, discretized komi, and any immediate ko prohibitions.
+  static Hash128 getSituationRulesAndKoHash(const Board& board, const BoardHistory& hist, Player nextPlayer, double drawEquivalentWinsForWhite);
+
 private:
   bool koHashOccursInHistory(Hash128 koHash, const KoHashTable* rootKoHashTable) const;
   void setKoRecapBlocked(Loc loc, bool b);
