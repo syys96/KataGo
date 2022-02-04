@@ -458,3 +458,8 @@ endif()
 
 target_include_directories(katago PUBLIC ${CMAKE_CURRENT_BINARY_DIR})
 
+
+#--------------------------- Attax COMPILING AND LINKING --------------------------------------------------------------
+add_executable(attax
+        attax_main.cpp
+        game/attax_board.cpp)

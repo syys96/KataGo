@@ -72,3 +72,6 @@ tmpsgf/
 watchgame.txt
 models/
 python/startposesupload.txt
+
+cpp/cmake-build-release
+cpp/cmake-build-debug
