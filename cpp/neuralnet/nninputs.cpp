@@ -826,14 +826,6 @@ Hash128 NNInputs::getHash(
 ) {
   Hash128 hash = BoardHistory::getSituationRulesAndKoHash(board, hist, nextPlayer, nnInputParams.drawEquivalentWinsForWhite);
 
-  //Fold in whether a pass ends this phase
-  bool passEndsPhase = hist.passWouldEndPhase(board,nextPlayer);
-  if(passEndsPhase) {
-    hash ^= Board::ZOBRIST_PASS_ENDS_PHASE;
-    //And in the case that a pass ends the phase, conservativePass also affects the result
-    if(nnInputParams.conservativePass)
-      hash ^= MiscNNInputParams::ZOBRIST_CONSERVATIVE_PASS;
-  }
   //Fold in whether the game is over or not, since this affects how we compute input features
   //but is not a function necessarily of previous hashed values.
   //If the history is in a weird prolonged state, also treat it similarly.
@@ -955,8 +947,7 @@ void NNInputs::fillRowV3(
   //Or if the game is in fact over right now!
   bool hideHistory =
     hist.isGameFinished ||
-    hist.isPastNormalPhaseEnd ||
-    (nnInputParams.conservativePass && hist.passWouldEndGame(board,nextPlayer));
+    hist.isPastNormalPhaseEnd;
 
   //Features 9,10,11,12,13
   if(!hideHistory) {
@@ -1134,7 +1125,7 @@ void NNInputs::fillRowV3(
     rowGlobal[11] = 1.0f;
 
   //Does a pass end the current phase given the ruleset and history?
-  bool passWouldEndPhase = hideHistory ? false : hist.passWouldEndPhase(board,nextPlayer);
+  bool passWouldEndPhase = false;
   rowGlobal[12] = passWouldEndPhase ? 1.0f : 0.0f;
 
   //Provide parity information about the board size and komi
@@ -1296,8 +1287,7 @@ void NNInputs::fillRowV4(
   //Or if the game is in fact over right now!
   bool hideHistory =
     hist.isGameFinished ||
-    hist.isPastNormalPhaseEnd ||
-    (nnInputParams.conservativePass && hist.passWouldEndGame(board,nextPlayer));
+    hist.isPastNormalPhaseEnd;
 
   //Features 9,10,11,12,13
   if(!hideHistory) {
@@ -1464,7 +1454,7 @@ void NNInputs::fillRowV4(
     rowGlobal[11] = 1.0f;
 
   //Does a pass end the current phase given the ruleset and history?
-  bool passWouldEndPhase = hideHistory ? false : hist.passWouldEndPhase(board,nextPlayer);
+  bool passWouldEndPhase = false;
   rowGlobal[12] = passWouldEndPhase ? 1.0f : 0.0f;
 
   //Provide parity information about the board size and komi
@@ -1619,8 +1609,7 @@ void NNInputs::fillRowV5(
   //Or if the game is in fact over right now!
   bool hideHistory =
     hist.isGameFinished ||
-    hist.isPastNormalPhaseEnd ||
-    (nnInputParams.conservativePass && hist.passWouldEndGame(board,nextPlayer));
+    hist.isPastNormalPhaseEnd;
 
   //Features 6,7,8,9,10
   if(!hideHistory) {
@@ -1826,8 +1815,7 @@ void NNInputs::fillRowV6(
   //Or if the game is in fact over right now!
   bool hideHistory =
     hist.isGameFinished ||
-    hist.isPastNormalPhaseEnd ||
-    (nnInputParams.conservativePass && hist.passWouldEndGame(board,nextPlayer));
+    hist.isPastNormalPhaseEnd;
 
   //Features 9,10,11,12,13
   if(!hideHistory) {
@@ -2059,7 +2047,7 @@ void NNInputs::fillRowV6(
     rowGlobal[13] = 1.0f;
 
   //Does a pass end the current phase given the ruleset and history?
-  bool passWouldEndPhase = hideHistory ? false : hist.passWouldEndPhase(board,nextPlayer);
+  bool passWouldEndPhase = false;
   rowGlobal[14] = passWouldEndPhase ? 1.0f : 0.0f;
 
   //Provide parity information about the board size and komi

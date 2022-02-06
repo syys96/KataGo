@@ -3233,8 +3233,7 @@ void Search::maybeRecomputeExistingNNOutput(
       //Recompute if we have no ownership map, since we need it for getEndingWhiteScoreBonus
       //If conservative passing, then we may also need to recompute the root policy ignoring the history if a pass ends the game
       //If averaging a bunch of symmetries, then we need to recompute it too
-      if(nnOutput->whiteOwnerMap == NULL ||
-         (searchParams.conservativePass && thread.history.passWouldEndGame(thread.board,thread.pla)) ||
+      if(nnOutput->whiteOwnerMap == NULL  ||
          searchParams.rootNumSymmetriesToSample > 1
       ) {
         initNodeNNOutput(thread,node,isRoot,false,true);

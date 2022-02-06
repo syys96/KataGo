@@ -115,10 +115,6 @@ static Hash128 getStateHash(const BoardHistory& hist) {
   double drawEquivalentWinsForWhite = 0.5;
   Hash128 hash = BoardHistory::getSituationRulesAndKoHash(board, hist, nextPlayer, drawEquivalentWinsForWhite);
 
-  // Fold in whether a pass ends this phase
-  bool passEndsPhase = hist.passWouldEndPhase(board,nextPlayer);
-  if(passEndsPhase)
-    hash ^= Board::ZOBRIST_PASS_ENDS_PHASE;
   // Fold in whether the game is over or not
   if(hist.isGameFinished)
     hash ^= Board::ZOBRIST_GAME_IS_OVER;

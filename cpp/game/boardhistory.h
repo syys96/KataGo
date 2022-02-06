@@ -46,12 +46,6 @@ struct BoardHistory {
   //Locations where the next player is not allowed to play due to superko
   bool superKoBanned[Board::MAX_ARR_SIZE];
 
-  //Number of consecutive passes made that count for ending the game or phase
-  int consecutiveEndingPasses;
-  //All ko hashes from which a player passed
-  std::vector<Hash128> hashesBeforeBlackPass;
-  std::vector<Hash128> hashesBeforeWhitePass;
-
   //Encore phase 0,1,2 for territory scoring
   int encorePhase;
   //How many turns of history do we have in the current main or encore phase?
@@ -120,9 +114,7 @@ struct BoardHistory {
 
   //Check if a move on the board is legal, taking into account the full game state and superko
   bool isLegal(const Board& board, Loc moveLoc, Player movePla) const;
-  //Check if passing right now would end the current phase of play, or the entire game
-  bool passWouldEndPhase(const Board& board, Player movePla) const;
-  bool passWouldEndGame(const Board& board, Player movePla) const;
+
   //Check if this is the final phase of the game, such that ending it moves to scoring.
   bool isFinalPhase() const;
   //Check if the specified move is a pass-for-ko encore move.
@@ -138,6 +130,7 @@ struct BoardHistory {
   //Make a move with legality checking, but be mostly tolerant and allow moves that can still be handled but that may not technically
   //be legal. This is intended for reading moves from SGFs and such where maybe we're getting moves that were played in a different
   //ruleset than ours. Returns true if successful, false if was illegal even unter tolerant rules.
+  bool thisMoveEndGame(Board& board, Loc moveLoc, Player movePla);
   bool makeBoardMoveTolerant(Board& board, Loc moveLoc, Player movePla);
   bool makeBoardMoveTolerant(Board& board, Loc moveLoc, Player movePla, bool preventEncore);
   bool isLegalTolerant(const Board& board, Loc moveLoc, Player movePla) const;
@@ -174,9 +167,7 @@ private:
   int countAreaScoreWhiteMinusBlack(const Board& board, Color area[Board::MAX_ARR_SIZE]) const;
   int countTerritoryAreaScoreWhiteMinusBlack(const Board& board, Color area[Board::MAX_ARR_SIZE]) const;
   void setFinalScoreAndWinner(float score);
-  int newConsecutiveEndingPassesAfterPass() const;
   bool phaseHasSpightlikeEndingAndPassHistoryClearing() const;
-  bool wouldBeSpightlikeEndingPass(Player movePla, Hash128 koHashBeforeMove) const;
 };
 
 struct KoHashTable {

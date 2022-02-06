@@ -14,6 +14,9 @@ struct Rules {
   static const int KO_SPIGHT = 3;
   int koRule;
 
+  static const int END_STANDARD = 0;
+  int endRule;
+
   static const int SCORING_AREA = 0;
   static const int SCORING_TERRITORY = 1;
   int scoringRule;
