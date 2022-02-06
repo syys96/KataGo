@@ -37,7 +37,7 @@ BoardHistory::BoardHistory()
    recentBoards(),
    currentRecentBoardIdx(0),
    presumedNextMovePla(P_BLACK),
-   encorePhase(0),numTurnsThisPhase(0),
+   numTurnsThisPhase(0),
    koRecapBlockHash(),
    koCapturesInEncore(),
    whiteBonusScore(0.0f),
@@ -69,7 +69,7 @@ BoardHistory::BoardHistory(const Board& board, Player pla, const Rules& r, int e
    recentBoards(),
    currentRecentBoardIdx(0),
    presumedNextMovePla(pla),
-   encorePhase(0),numTurnsThisPhase(0),
+   numTurnsThisPhase(0),
    koRecapBlockHash(),
    koCapturesInEncore(),
    whiteBonusScore(0.0f),
@@ -100,7 +100,7 @@ BoardHistory::BoardHistory(const BoardHistory& other)
    recentBoards(),
    currentRecentBoardIdx(other.currentRecentBoardIdx),
    presumedNextMovePla(other.presumedNextMovePla),
-   encorePhase(other.encorePhase),numTurnsThisPhase(other.numTurnsThisPhase),
+   numTurnsThisPhase(other.numTurnsThisPhase),
    koRecapBlockHash(other.koRecapBlockHash),
    koCapturesInEncore(other.koCapturesInEncore),
    whiteBonusScore(other.whiteBonusScore),
@@ -137,7 +137,6 @@ BoardHistory& BoardHistory::operator=(const BoardHistory& other)
   presumedNextMovePla = other.presumedNextMovePla;
   std::copy(other.wasEverOccupiedOrPlayed, other.wasEverOccupiedOrPlayed+Board::MAX_ARR_SIZE, wasEverOccupiedOrPlayed);
   std::copy(other.superKoBanned, other.superKoBanned+Board::MAX_ARR_SIZE, superKoBanned);
-  encorePhase = other.encorePhase;
   numTurnsThisPhase = other.numTurnsThisPhase;
   std::copy(other.koRecapBlocked, other.koRecapBlocked+Board::MAX_ARR_SIZE, koRecapBlocked);
   koRecapBlockHash = other.koRecapBlockHash;
@@ -170,7 +169,7 @@ BoardHistory::BoardHistory(BoardHistory&& other) noexcept
   recentBoards(),
   currentRecentBoardIdx(other.currentRecentBoardIdx),
   presumedNextMovePla(other.presumedNextMovePla),
-  encorePhase(other.encorePhase),numTurnsThisPhase(other.numTurnsThisPhase),
+  numTurnsThisPhase(other.numTurnsThisPhase),
   koRecapBlockHash(other.koRecapBlockHash),
   koCapturesInEncore(std::move(other.koCapturesInEncore)),
   whiteBonusScore(other.whiteBonusScore),
@@ -204,7 +203,6 @@ BoardHistory& BoardHistory::operator=(BoardHistory&& other) noexcept
   presumedNextMovePla = other.presumedNextMovePla;
   std::copy(other.wasEverOccupiedOrPlayed, other.wasEverOccupiedOrPlayed+Board::MAX_ARR_SIZE, wasEverOccupiedOrPlayed);
   std::copy(other.superKoBanned, other.superKoBanned+Board::MAX_ARR_SIZE, superKoBanned);
-  encorePhase = other.encorePhase;
   numTurnsThisPhase = other.numTurnsThisPhase;
   std::copy(other.koRecapBlocked, other.koRecapBlocked+Board::MAX_ARR_SIZE, koRecapBlocked);
   koRecapBlockHash = other.koRecapBlockHash;

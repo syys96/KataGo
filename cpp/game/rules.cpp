@@ -13,7 +13,6 @@ Rules::Rules() {
   scoringRule = SCORING_AREA;
   taxRule = TAX_NONE;
   multiStoneSuicideLegal = true;
-  hasButton = false;
   whiteHandicapBonusRule = WHB_ZERO;
   friendlyPassOk = false;
   komi = 7.5f;
@@ -24,7 +23,6 @@ Rules::Rules(
   int sRule,
   int tRule,
   bool suic,
-  bool button,
   int whbRule,
   bool pOk,
   float km
@@ -33,7 +31,6 @@ Rules::Rules(
    scoringRule(sRule),
    taxRule(tRule),
    multiStoneSuicideLegal(suic),
-   hasButton(button),
    whiteHandicapBonusRule(whbRule),
    friendlyPassOk(pOk),
    komi(km)
@@ -48,7 +45,6 @@ bool Rules::operator==(const Rules& other) const {
     scoringRule == other.scoringRule &&
     taxRule == other.taxRule &&
     multiStoneSuicideLegal == other.multiStoneSuicideLegal &&
-    hasButton == other.hasButton &&
     whiteHandicapBonusRule == other.whiteHandicapBonusRule &&
     friendlyPassOk == other.friendlyPassOk &&
     komi == other.komi;
@@ -60,7 +56,6 @@ bool Rules::operator!=(const Rules& other) const {
     scoringRule != other.scoringRule ||
     taxRule != other.taxRule ||
     multiStoneSuicideLegal != other.multiStoneSuicideLegal ||
-    hasButton != other.hasButton ||
     whiteHandicapBonusRule != other.whiteHandicapBonusRule ||
     friendlyPassOk != other.friendlyPassOk ||
     komi != other.komi;
@@ -72,14 +67,13 @@ bool Rules::equalsIgnoringKomi(const Rules& other) const {
     scoringRule == other.scoringRule &&
     taxRule == other.taxRule &&
     multiStoneSuicideLegal == other.multiStoneSuicideLegal &&
-    hasButton == other.hasButton &&
     whiteHandicapBonusRule == other.whiteHandicapBonusRule &&
     friendlyPassOk == other.friendlyPassOk;
 }
 
 bool Rules::gameResultWillBeInteger() const {
   bool komiIsInteger = ((int)komi) == komi;
-  return komiIsInteger != hasButton;
+  return komiIsInteger;
 }
 
 Rules Rules::getTrompTaylorish() {

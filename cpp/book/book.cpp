@@ -119,11 +119,6 @@ static Hash128 getStateHash(const BoardHistory& hist) {
   if(hist.isGameFinished)
     hash ^= Board::ZOBRIST_GAME_IS_OVER;
 
-  // Fold in consecutive pass count. Probably usually redundant with history tracking. Use some standard LCG constants.
-  static constexpr uint64_t CONSECPASS_MULT0 = 2862933555777941757ULL;
-  static constexpr uint64_t CONSECPASS_MULT1 = 3202034522624059733ULL;
-  hash.hash0 += CONSECPASS_MULT0 * (uint64_t)hist.consecutiveEndingPasses;
-  hash.hash1 += CONSECPASS_MULT1 * (uint64_t)hist.consecutiveEndingPasses;
   return hash;
 }
 

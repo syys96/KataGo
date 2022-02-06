@@ -2209,8 +2209,7 @@ void NNInputs::fillRowV7(
   //Or if the game is in fact over right now!
   bool hideHistory =
     hist.isGameFinished ||
-    hist.isPastNormalPhaseEnd ||
-    (nnInputParams.conservativePass && hist.passWouldEndGame(board,nextPlayer));
+    hist.isPastNormalPhaseEnd;
 
   //Features 9,10,11,12,13
   if(!hideHistory) {
@@ -2442,7 +2441,7 @@ void NNInputs::fillRowV7(
     rowGlobal[13] = 1.0f;
 
   //Does a pass end the current phase given the ruleset and history?
-  bool passWouldEndPhase = hideHistory ? false : hist.passWouldEndPhase(board,nextPlayer);
+  bool passWouldEndPhase = false;
   rowGlobal[14] = passWouldEndPhase ? 1.0f : 0.0f;
 
   //Used for handicap play

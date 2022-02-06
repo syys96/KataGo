@@ -27,7 +27,6 @@ struct Rules {
   int taxRule;
 
   bool multiStoneSuicideLegal;
-  bool hasButton;
 
   static const int WHB_ZERO = 0;
   static const int WHB_N = 1;
@@ -50,7 +49,6 @@ struct Rules {
     int scoringRule,
     int taxRule,
     bool multiStoneSuicideLegal,
-    bool hasButton,
     int whiteHandicapBonusRule,
     bool friendlyPassOk,
     float komi

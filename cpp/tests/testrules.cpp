@@ -24,7 +24,6 @@ static void checkKoHashConsistency(BoardHistory& hist, Board& board, Player next
 }
 
 static void makeMoveAssertLegal(BoardHistory& hist, Board& board, Loc loc, Player pla, int line, bool preventEncore, const KoHashTable* table) {
-  bool phaseWouldEnd = hist.passWouldEndPhase(board,pla);
   int oldPhase = hist.encorePhase;
 
   if(!hist.isLegal(board, loc, pla))
@@ -36,7 +35,7 @@ static void makeMoveAssertLegal(BoardHistory& hist, Board& board, Loc loc, Playe
 
   if(loc == Board::PASS_LOC) {
     int newPhase = hist.encorePhase;
-    if((phaseWouldEnd && !preventEncore) != (newPhase != oldPhase || hist.isGameFinished))
+    if(false != (newPhase != oldPhase || hist.isGameFinished))
       throw StringError("hist.passWouldEndPhase returned different answer than what actually happened after a pass");
   }
 }
@@ -324,8 +323,6 @@ oooo.o
       out << "After black ko capture and one pass:" << endl;
       printIllegalMoves(out,board,hist,P_BLACK);
 
-      testAssert(hist.passWouldEndPhase(board,P_BLACK));
-      testAssert(!hist.passWouldEndGame(board,P_BLACK));
       makeMoveAssertLegal(hist, board, Location::getLoc(2,3,board.x_size), P_BLACK, __LINE__);
       testAssert(hist.encorePhase == 0);
       testAssert(hist.isGameFinished == false);
@@ -2532,7 +2529,6 @@ Last moves pass pass pass pass
           for(int x = 0; x<board.x_size; x++)
             out << PlayerIO::colorToChar(board.colors[Location::getLoc(x,y,board.x_size)]);
         out << " NP" << PlayerIO::colorToChar(nextPla);
-        out << " PS" << hist.consecutiveEndingPasses;
         out << " E" << hist.encorePhase;
         out << " ";
         out << " ";
@@ -3257,10 +3253,6 @@ isResignation: 0
       for(int i = 0; i<Board::MAX_ARR_SIZE; i++)
         testAssert(hist2.superKoBanned[i] == false);
 
-      out << hist.consecutiveEndingPasses << " " << hist2.consecutiveEndingPasses << endl;
-      out << hist.hashesBeforeBlackPass.size() << " " << hist2.hashesBeforeBlackPass.size() << endl;
-      out << hist.hashesBeforeWhitePass.size() << " " << hist2.hashesBeforeWhitePass.size() << endl;
-      out << hist.encorePhase << " " << hist2.encorePhase << endl;
 
       for(int i = 0; i<Board::MAX_ARR_SIZE; i++)
         testAssert(hist.koRecapBlocked[i] == false);

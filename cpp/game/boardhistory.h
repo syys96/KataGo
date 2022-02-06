@@ -46,8 +46,6 @@ struct BoardHistory {
   //Locations where the next player is not allowed to play due to superko
   bool superKoBanned[Board::MAX_ARR_SIZE];
 
-  //Encore phase 0,1,2 for territory scoring
-  int encorePhase;
   //How many turns of history do we have in the current main or encore phase?
   int numTurnsThisPhase;
 
