@@ -121,8 +121,6 @@ Board::Board(const Board& other)
   ko_loc = other.ko_loc;
   // empty_list = other.empty_list;
   pos_hash = other.pos_hash;
-  numBlackCaptures = other.numBlackCaptures;
-  numWhiteCaptures = other.numWhiteCaptures;
 
   memcpy(adj_offsets, other.adj_offsets, sizeof(short)*8);
 }
@@ -151,8 +149,6 @@ void Board::init(int xS, int yS)
 
   ko_loc = NULL_LOC;
   pos_hash = ZOBRIST_SIZE_X_HASH[x_size] ^ ZOBRIST_SIZE_Y_HASH[y_size];
-  numBlackCaptures = 0;
-  numWhiteCaptures = 0;
 
   Location::getAdjacentOffsets(adj_offsets,x_size);
 }
@@ -252,56 +248,6 @@ int Board::getNumLiberties(Loc loc) const
   return chain_data[chain_head[loc]].num_liberties;
 }
 
-//Check if moving here would be a self-capture
-bool Board::isSuicide(Loc loc, Player pla) const
-{
-  if(loc == PASS_LOC)
-    return false;
-
-  Player opp = getOpp(pla);
-  FOREACHADJ(
-    Loc adj = loc + ADJOFFSET;
-
-    if(colors[adj] == C_EMPTY)
-      return false;
-    else if(colors[adj] == pla)
-    {
-      if(getNumLiberties(adj) > 1)
-        return false;
-    }
-    else if(colors[adj] == opp)
-    {
-      if(getNumLiberties(adj) == 1)
-        return false;
-    }
-  );
-
-  return true;
-}
-
-//Check if moving here is would be an illegal self-capture
-bool Board::isIllegalSuicide(Loc loc, Player pla, bool isMultiStoneSuicideLegal) const
-{
-  Player opp = getOpp(pla);
-  FOREACHADJ(
-    Loc adj = loc + ADJOFFSET;
-
-    if(colors[adj] == C_EMPTY)
-      return false;
-    else if(colors[adj] == pla)
-    {
-      if(isMultiStoneSuicideLegal || getNumLiberties(adj) > 1)
-        return false;
-    }
-    else if(colors[adj] == opp)
-    {
-      if(getNumLiberties(adj) == 1)
-        return false;
-    }
-  );
-
-  return true;
-}
 
 //Returns a fast lower bound on the number of liberties a new stone placed here would have
 void Board::getBoundNumLibertiesAfterPlay(Loc loc, Player pla, int& lowerBound, int& upperBound) const
@@ -438,7 +384,7 @@ bool Board::isOnBoard(Loc loc) const {
 }
 
 //Check if moving here is illegal.
-bool Board::isLegal(Loc loc, Player pla, bool isMultiStoneSuicideLegal) const
+bool Board::isLegal(Loc loc, Player pla) const
 {
   if(pla != P_BLACK && pla != P_WHITE)
     return false;
@@ -446,21 +392,19 @@ bool Board::isLegal(Loc loc, Player pla, bool isMultiStoneSuicideLegal) const
     loc >= 0 &&
     loc < MAX_ARR_SIZE &&
     (colors[loc] == C_EMPTY) &&
-    !isKoBanned(loc) &&
-    !isIllegalSuicide(loc, pla, isMultiStoneSuicideLegal)
+    !isKoBanned(loc)
   );
 }
 
 //Check if moving here is illegal, ignoring simple ko
-bool Board::isLegalIgnoringKo(Loc loc, Player pla, bool isMultiStoneSuicideLegal) const
+bool Board::isLegalIgnoringKo(Loc loc, Player pla) const
 {
   if(pla != P_BLACK && pla != P_WHITE)
     return false;
   return loc == PASS_LOC || (
     loc >= 0 &&
     loc < MAX_ARR_SIZE &&
-    (colors[loc] == C_EMPTY) &&
-    !isIllegalSuicide(loc, pla, isMultiStoneSuicideLegal)
+    (colors[loc] == C_EMPTY)
   );
 }
 
@@ -675,8 +619,7 @@ bool Board::setStone(Loc loc, Color color)
     removeSingleStone(loc);
   else {
     removeSingleStone(loc);
-    if(!isSuicide(loc,color))
-      playMoveAssumeLegal(loc,color);
+    playMoveAssumeLegal(loc,color);
   }
 
   ko_loc = NULL_LOC;
@@ -685,9 +628,9 @@ bool Board::setStone(Loc loc, Color color)
 
 
 //Attempts to play the specified move. Returns true if successful, returns false if the move was illegal.
-bool Board::playMove(Loc loc, Player pla, bool isMultiStoneSuicideLegal)
+bool Board::playMove(Loc loc, Player pla)
 {
-  if(isLegal(loc,pla,isMultiStoneSuicideLegal))
+  if(isLegal(loc,pla))
   {
     playMoveAssumeLegal(loc,pla);
     return true;
@@ -1734,74 +1677,6 @@ bool Board::searchIsLadderCaptured(Loc loc, bool defenderFirst, vector<Loc>& buf
 
 }
 
-void Board::calculateArea(
-  Color* result,
-  bool nonPassAliveStones,
-  bool safeBigTerritories,
-  bool unsafeBigTerritories,
-  bool isMultiStoneSuicideLegal
-) const {
-  std::fill(result,result+MAX_ARR_SIZE,C_EMPTY);
-  calculateAreaForPla(P_BLACK,safeBigTerritories,unsafeBigTerritories,isMultiStoneSuicideLegal,result);
-  calculateAreaForPla(P_WHITE,safeBigTerritories,unsafeBigTerritories,isMultiStoneSuicideLegal,result);
-
-  //TODO can we merge this in to calculate area for pla?
-  if(nonPassAliveStones) {
-    for(int y = 0; y < y_size; y++) {
-      for(int x = 0; x < x_size; x++) {
-        Loc loc = Location::getLoc(x,y,x_size);
-        if(result[loc] == C_EMPTY)
-          result[loc] = colors[loc];
-      }
-    }
-  }
-}
-
-void Board::calculateIndependentLifeArea(
-  Color* result,
-  int& whiteMinusBlackIndependentLifeRegionCount,
-  bool keepTerritories,
-  bool keepStones,
-  bool isMultiStoneSuicideLegal
-) const {
-  //First, just compute basic area.
-  Color basicArea[MAX_ARR_SIZE];
-  std::fill(result,result+MAX_ARR_SIZE,C_EMPTY);
-  std::fill(basicArea,basicArea+MAX_ARR_SIZE,C_EMPTY);
-  calculateAreaForPla(P_BLACK,true,true,isMultiStoneSuicideLegal,basicArea);
-  calculateAreaForPla(P_WHITE,true,true,isMultiStoneSuicideLegal,basicArea);
-
-  //TODO can we merge this in to calculate area for pla?
-  for(int y = 0; y < y_size; y++) {
-    for(int x = 0; x < x_size; x++) {
-      Loc loc = Location::getLoc(x,y,x_size);
-      if(basicArea[loc] == C_EMPTY)
-        basicArea[loc] = colors[loc];
-    }
-  }
-
-  calculateIndependentLifeAreaHelper(basicArea,result,whiteMinusBlackIndependentLifeRegionCount);
-
-  if(keepTerritories) {
-    for(int y = 0; y < y_size; y++) {
-      for(int x = 0; x < x_size; x++) {
-        Loc loc = Location::getLoc(x,y,x_size);
-        if(basicArea[loc] != C_EMPTY && basicArea[loc] != colors[loc])
-          result[loc] = basicArea[loc];
-      }
-    }
-  }
-  if(keepStones) {
-    for(int y = 0; y < y_size; y++) {
-      for(int x = 0; x < x_size; x++) {
-        Loc loc = Location::getLoc(x,y,x_size);
-        if(basicArea[loc] != C_EMPTY && basicArea[loc] == colors[loc])
-          result[loc] = basicArea[loc];
-      }
-    }
-  }
-
-}
 
 //This marks pass-alive stones, pass-alive territory always.
 //If safeBigTerritories, marks empty regions bordered by pla stones and no opp stones, where all pla stones are pass-alive.

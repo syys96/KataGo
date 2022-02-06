@@ -8,35 +8,13 @@
 
 struct Rules {
 
-  static const int KO_SIMPLE = 0;
-  static const int KO_POSITIONAL = 1;
-  static const int KO_SITUATIONAL = 2;
-  static const int KO_SPIGHT = 3;
-  int koRule;
-
-  static const int END_STANDARD = 0;
+  static const int END_NONE = 0;
+  static const int END_STANDARD = 1;
   int endRule;
 
-  static const int SCORING_AREA = 0;
-  static const int SCORING_TERRITORY = 1;
+  static const int SCOREING_NONE = 0;
+  static const int SCOREING_NUM = 1;
   int scoringRule;
-
-  static const int TAX_NONE = 0;
-  static const int TAX_SEKI = 1;
-  static const int TAX_ALL = 2;
-  int taxRule;
-
-  bool multiStoneSuicideLegal;
-
-  static const int WHB_ZERO = 0;
-  static const int WHB_N = 1;
-  static const int WHB_N_MINUS_ONE = 2;
-  int whiteHandicapBonusRule;
-
-  //Mostly an informational value - doesn't affect the actual implemented rules, but GTP or Analysis may, at a
-  //high level, use this info to adjust passing behavior - whether it's okay to pass without capturing dead stones.
-  //Only relevant for area scoring.
-  bool friendlyPassOk;
 
   float komi;
   //Min and max acceptable komi in various places involving user input validation
@@ -45,12 +23,8 @@ struct Rules {
 
   Rules();
   Rules(
-    int koRule,
-    int scoringRule,
-    int taxRule,
-    bool multiStoneSuicideLegal,
-    int whiteHandicapBonusRule,
-    bool friendlyPassOk,
+    int eRule,
+    int sRule,
     float komi
   );
   ~Rules();
@@ -61,21 +35,11 @@ struct Rules {
   bool equalsIgnoringKomi(const Rules& other) const;
   bool gameResultWillBeInteger() const;
 
-  static Rules getTrompTaylorish();
-  static Rules getSimpleTerritory();
+  static Rules getStanddard();
 
-  static std::set<std::string> koRuleStrings();
-  static std::set<std::string> scoringRuleStrings();
-  static std::set<std::string> taxRuleStrings();
-  static std::set<std::string> whiteHandicapBonusRuleStrings();
-  static int parseKoRule(const std::string& s);
-  static int parseScoringRule(const std::string& s);
-  static int parseTaxRule(const std::string& s);
-  static int parseWhiteHandicapBonusRule(const std::string& s);
-  static std::string writeKoRule(int koRule);
-  static std::string writeScoringRule(int scoringRule);
-  static std::string writeTaxRule(int taxRule);
-  static std::string writeWhiteHandicapBonusRule(int whiteHandicapBonusRule);
+  static std::set<std::string> endRuleStrings();
+  static int parseEndRule(const std::string& s);
+  static std::string writeEndRule(int koRule);
 
   static bool komiIsIntOrHalfInt(float komi);
 

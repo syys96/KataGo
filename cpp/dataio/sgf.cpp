@@ -1497,16 +1497,6 @@ void WriteSgf::writeSgf(
   out << "PB[" << bName << "]";
   out << "PW[" << wName << "]";
 
-  if(gameData != NULL) {
-    out << "HA[" << gameData->handicapForSgf << "]";
-  }
-  else {
-    BoardHistory histCopy(endHist);
-    //Always use true for computing the handicap value that goes into an sgf
-    histCopy.setAssumeMultipleStartingBlackMovesAreHandicap(true);
-    out << "HA[" << histCopy.computeNumHandicapStones() << "]";
-  }
-
   out << "KM[" << rules.komi << "]";
   out << "RU[" << (tryNicerRulesString ? rules.toStringNoKomiMaybeNice() : rules.toStringNoKomi()) << "]";
   printGameResult(out,endHist);
