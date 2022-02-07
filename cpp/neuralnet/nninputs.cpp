@@ -59,11 +59,11 @@ static const double twoOverPi = 0.63661977236758134308;
 static const double piOverTwo = 1.57079632679489661923;
 
 double ScoreValue::whiteScoreDrawAdjust(double finalWhiteMinusBlackScore, double drawEquivalentWinsForWhite, const BoardHistory& hist) {
-  return finalWhiteMinusBlackScore + hist.whiteKomiAdjustmentForDraws(drawEquivalentWinsForWhite);
+  return finalWhiteMinusBlackScore + hist.whiteAdjustmentForDraws(drawEquivalentWinsForWhite);
 }
 
 double ScoreValue::whiteScoreValueOfScoreSmooth(double finalWhiteMinusBlackScore, double center, double scale, double drawEquivalentWinsForWhite, const Board& b, const BoardHistory& hist) {
-  double adjustedScore = finalWhiteMinusBlackScore + hist.whiteKomiAdjustmentForDraws(drawEquivalentWinsForWhite) - center;
+  double adjustedScore = finalWhiteMinusBlackScore + hist.whiteAdjustmentForDraws(drawEquivalentWinsForWhite) - center;
   if(b.x_size == b.y_size)
     return atan(adjustedScore / (scale*b.x_size)) * twoOverPi;
   else

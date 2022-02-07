@@ -11,6 +11,14 @@ static Hash128 getKoHashAfterMoveNonEncore(const Rules& rules, Hash128 posHashAf
     return posHashAfterMove;
 }
 
+float BoardHistory::whiteAdjustmentForDraws(double drawEquivalentWinsForWhite) {
+    //We fold the draw utility into the komi, for input into things like the neural net.
+    //Basically we model it as if the final score were jittered by a uniform draw from [-0.5,0.5].
+    //E.g. if komi from self perspective is 7 and a draw counts as 0.75 wins and 0.25 losses,
+    //then komi input should be as if it was 7.25, which in a jigo game when jittered by 0.5 gives white 75% wins and 25% losses.
+    float drawAdjustment = (float)(drawEquivalentWinsForWhite - 0.5);
+    return drawAdjustment;
+}
 
 BoardHistory::BoardHistory()
   :rules(),

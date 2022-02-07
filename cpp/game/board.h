@@ -12,7 +12,7 @@
 #include "../external/nlohmann_json/json.hpp"
 
 #ifndef COMPILE_MAX_BOARD_LEN
-#define COMPILE_MAX_BOARD_LEN 19
+#define COMPILE_MAX_BOARD_LEN 7
 #endif
 
 //TYPES AND CONSTANTS-----------------------------------------------------------------
@@ -99,7 +99,7 @@ struct Board
   //Board parameters and Constants----------------------------------------
 
   static constexpr int MAX_LEN = COMPILE_MAX_BOARD_LEN;  //Maximum edge length allowed for the board
-  static constexpr int DEFAULT_LEN = std::min(MAX_LEN,19); //Default edge length for board if unspecified
+  static constexpr int DEFAULT_LEN = std::min(MAX_LEN,7); //Default edge length for board if unspecified
   static constexpr int MAX_PLAY_SIZE = MAX_LEN * MAX_LEN;  //Maximum number of playable spaces
   static constexpr int MAX_ARR_SIZE = (MAX_LEN+1)*(MAX_LEN+2)+1; //Maximum size of arrays needed
 
@@ -117,34 +117,9 @@ struct Board
   static Hash128 ZOBRIST_PLAYER_HASH[4];
   static Hash128 ZOBRIST_KO_LOC_HASH[MAX_ARR_SIZE];
   static Hash128 ZOBRIST_KO_MARK_HASH[MAX_ARR_SIZE][4];
-  static Hash128 ZOBRIST_ENCORE_HASH[3];
-  static Hash128 ZOBRIST_SECOND_ENCORE_START_HASH[MAX_ARR_SIZE][4];
   static const Hash128 ZOBRIST_GAME_IS_OVER;
 
   //Structs---------------------------------------
-
-  //Tracks a chain/string/group of stones
-  struct ChainData {
-    Player owner;        //Owner of chain
-    short num_locs;      //Number of stones in chain
-    short num_liberties; //Number of liberties in chain
-  };
-
-  //Tracks locations for fast random selection
-  /* struct PointList { */
-  /*   PointList(); */
-  /*   PointList(const PointList&); */
-  /*   void operator=(const PointList&); */
-  /*   void add(Loc); */
-  /*   void remove(Loc); */
-  /*   int size() const; */
-  /*   Loc& operator[](int); */
-  /*   bool contains(Loc loc) const; */
-
-  /*   Loc list_[MAX_PLAY_SIZE];   //Locations in the list */
-  /*   int indices_[MAX_ARR_SIZE]; //Maps location to index in the list */
-  /*   int size_; */
-  /* }; */
 
   //Move data passed back when moves are made to allow for undos
   struct MoveRecord {
@@ -265,11 +240,6 @@ struct Board
   int y_size;                  //Vertical size of board
   Color colors[MAX_ARR_SIZE];  //Color of each location on the board.
 
-  //Every chain of stones has one of its stones arbitrarily designated as the head.
-  ChainData chain_data[MAX_ARR_SIZE]; //For each head stone, the chaindata for the chain under that head. Undefined otherwise.
-  Loc chain_head[MAX_ARR_SIZE];       //Where is the head of this chain? Undefined if EMPTY or WALL
-  Loc next_in_chain[MAX_ARR_SIZE];    //Location of next stone in chain. Circular linked list. Undefined if EMPTY or WALL
-
   Loc ko_loc;   //A simple ko capture was made here, making it illegal to replay here next move
 
   /* PointList empty_list; //List of all empty locations on board */
@@ -281,15 +251,8 @@ struct Board
   private:
   void init(int xS, int yS);
   int countHeuristicConnectionLibertiesX2(Loc loc, Player pla) const;
-  bool isLibertyOf(Loc loc, Loc head) const;
-  void mergeChains(Loc loc1, Loc loc2);
-  int removeChain(Loc loc);
   void removeSingleStone(Loc loc);
 
-  void addChain(Loc loc, Player pla);
-  Loc addChainHelper(Loc head, Loc tailTarget, Loc loc, Color color);
-  void rebuildChain(Loc loc, Player pla);
-  Loc rebuildChainHelper(Loc head, Loc tailTarget, Loc loc, Color color);
   void changeSurroundingLiberties(Loc loc, Color color, int delta);
 
   friend std::ostream& operator<<(std::ostream& out, const Board& board);
@@ -298,15 +261,6 @@ struct Board
   int findLibertyGainingCaptures(Loc loc, std::vector<Loc>& buf, int bufStart, int bufIdx) const;
   bool hasLibertyGainingCaptures(Loc loc) const;
 
-  void calculateAreaForPla(
-    Player pla,
-    bool safeBigTerritories,
-    bool unsafeBigTerritories,
-    bool isMultiStoneSuicideLegal,
-    Color* result
-  ) const;
-
-  bool isAdjacentToPlaHead(Player pla, Loc loc, Loc plaHead) const;
 
   void calculateIndependentLifeAreaHelper(
     const Color* basicArea,

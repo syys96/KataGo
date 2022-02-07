@@ -50,6 +50,8 @@ struct BoardHistory {
   STRUCT_NAMED_TRIPLE(Hash128,posHashBeforeMove,Loc,moveLoc,Player,movePla,EncoreKoCapture);
   std::vector<EncoreKoCapture> koCapturesInEncore;
 
+  static float whiteAdjustmentForDraws(double drawEquivalentWinsForWhite) ;
+
 
   //Is the game been prolonged to stay in a given phase without proceeding to the next?
   bool isPastNormalPhaseEnd;
