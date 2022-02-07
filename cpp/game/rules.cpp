@@ -9,77 +9,53 @@ using json = nlohmann::json;
 
 Rules::Rules() {
   //Defaults to Attax rules
-  endRule = END_ATTAX_STANDARD;
-  scoringRule = SCORING_ATTAX_STANDARD;
+  gameRule = GAME_ATTAX_STANDARD;
 }
 
 Rules::Rules(
-  int eRule,
-  int sRule
+  GameRule gRule
 )
-  :endRule(eRule),
-   scoringRule(sRule)
+  :gameRule(gRule)
 {}
 
-Rules::~Rules() {
-}
+Rules::~Rules() = default;
 
 bool Rules::operator==(const Rules& other) const {
   return
-    endRule == other.endRule &&
-    scoringRule == other.scoringRule;
+    gameRule == other.gameRule;
 }
 
 bool Rules::operator!=(const Rules& other) const {
   return
-    endRule != other.endRule ||
-    scoringRule != other.scoringRule;
+    gameRule != other.gameRule;
 }
 
 
 Rules Rules::getStanddard() {
     Rules rules;
-    rules.scoringRule = SCORING_ATTAX_STANDARD;
-    rules.endRule = END_ATTAX_STANDARD;
+    rules.gameRule = GAME_ATTAX_STANDARD;
     return rules;
 }
 
 
-set<string> Rules::endRuleStrings() {
-  return {"END_ATTAX_STANDARD, END_GOMOKU_STANDARD"};
+set<string> Rules::gameRuleStrings() {
+  return {"GAME_ATTAX_STANDARD, GAME_GOMOKU_STANDARD"};
 }
 
-set<string> Rules::scoringRuleStrings() {
-    return {"SCORING_ATTAX_STANDARD, SCORING_GOMOKU_STANDARD"};
+Rules::GameRule Rules::parseGameRule(const string& s) {
+  if(s == "GAME_ATTAX_STANDARD") return Rules::GAME_ATTAX_STANDARD;
+  else if(s == "GAME_GOMOKU_STANDARD") return Rules::GAME_GOMOKU_STANDARD;
+  else throw IOError("Rules::parseGameRule: Invalid end rule: " + s);
 }
 
-int Rules::parseEndRule(const string& s) {
-  if(s == "END_ATTAX_STANDARD") return Rules::END_ATTAX_STANDARD;
-  else if(s == "END_GOMOKU_STANDARD") return Rules::END_GOMOKU_STANDARD;
-  else throw IOError("Rules::parseEndRule: Invalid end rule: " + s);
-}
-
-int Rules::parseScoringRule(const string& s) {
-    if(s == "SCORING_ATTAX_STANDARD") return Rules::SCORING_ATTAX_STANDARD;
-    else if(s == "SCORING_GOMOKU_STANDARD") return Rules::SCORING_GOMOKU_STANDARD;
-    else throw IOError("Rules::parseScoringRule: Invalid end rule: " + s);
-}
-
-string Rules::writeEndRule(int endRule) {
-  if(endRule == Rules::END_ATTAX_STANDARD) return string("END_ATTAX_STANDARD");
-  else if(endRule == Rules::END_GOMOKU_STANDARD) return string("END_GOMOKU_STANDARD");
+string Rules::writeGameRule(GameRule endRule) {
+  if(endRule == Rules::GAME_ATTAX_STANDARD) return string("GAME_ATTAX_STANDARD");
+  else if(endRule == Rules::GAME_GOMOKU_STANDARD) return string("GAME_GOMOKU_STANDARD");
   return string("UNKNOWN");
 }
 
-string Rules::writeScoringRule(int scoringRule) {
-    if(scoringRule == Rules::SCORING_ATTAX_STANDARD) return string("SCORING_ATTAX_STANDARD");
-    else if(scoringRule == Rules::SCORING_GOMOKU_STANDARD) return string("SCORING_GOMOKU_STANDARD");
-    return string("UNKNOWN");
-}
-
 ostream& operator<<(ostream& out, const Rules& rules) {
-  out << "end" << Rules::writeEndRule(rules.endRule);
-  out << "scoring" << Rules::writeScoringRule(rules.scoringRule);
+  out << "game" << Rules::writeGameRule(rules.gameRule);
   return out;
 }
 
@@ -92,8 +68,7 @@ string Rules::toString() const {
 
 json Rules::toJsonHelper() const {
   json ret;
-  ret["end"] = writeEndRule(endRule);
-  ret["scoring"] = writeScoringRule(scoringRule);
+  ret["game"] = writeGameRule(gameRule);
   return ret;
 }
 
@@ -119,12 +94,10 @@ static Rules parseRulesHelper(const string& sOrig) {
   Rules rules;
   string lowercased = Global::trim(Global::toLower(sOrig));
   if(lowercased == "attax_standard") {
-    rules.endRule = Rules::END_ATTAX_STANDARD;
-    rules.scoringRule = Rules::SCORING_ATTAX_STANDARD;
+    rules.gameRule = Rules::GAME_ATTAX_STANDARD;
   }
   else if (lowercased == "gomoku_standard") {
-      rules.endRule = Rules::END_GOMOKU_STANDARD;
-      rules.scoringRule = Rules::SCORING_GOMOKU_STANDARD;
+      rules.gameRule = Rules::GAME_GOMOKU_STANDARD;
   }
   else if(sOrig.length() > 0 && sOrig[0] == '{') {
     //Default if not specified
@@ -134,10 +107,8 @@ static Rules parseRulesHelper(const string& sOrig) {
       string s;
       for(json::iterator iter = input.begin(); iter != input.end(); ++iter) {
         const string key = iter.key();
-        if(key == "end")
-          rules.endRule = Rules::parseEndRule(iter.value().get<string>());
-        else if (key == "scoring")
-          rules.scoringRule = Rules::parseScoringRule(iter.value().get<string>());
+        if(key == "game")
+          rules.gameRule = Rules::parseGameRule(iter.value().get<string>());
         else
           throw IOError("Unknown rules option: " + key);
       }
@@ -170,17 +141,11 @@ static Rules parseRulesHelper(const string& sOrig) {
     while(true) {
       if(s.length() <= 0)
         break;
-      if(startsWithAndStrip(s,"end")) {
-        if(startsWithAndStrip(s,"ATTAX_STANDARD")) rules.endRule = Rules::END_ATTAX_STANDARD;
-        else if(startsWithAndStrip(s,"GOMOKU_STANDARD")) rules.endRule = Rules::END_GOMOKU_STANDARD;
+      if(startsWithAndStrip(s,"game")) {
+        if(startsWithAndStrip(s,"attax_standard")) rules.gameRule = Rules::GAME_ATTAX_STANDARD;
+        else if(startsWithAndStrip(s,"gomoku_standard")) rules.gameRule = Rules::GAME_GOMOKU_STANDARD;
         else throw IOError("Could not parse rules: " + sOrig);
         continue;
-      }
-      if(startsWithAndStrip(s,"scoring")) {
-          if(startsWithAndStrip(s,"ATTAX_STANDARD")) rules.endRule = Rules::SCORING_ATTAX_STANDARD;
-          else if(startsWithAndStrip(s,"GOMOKU_STANDARD")) rules.endRule = Rules::SCORING_GOMOKU_STANDARD;
-          else throw IOError("Could not parse rules: " + sOrig);
-          continue;
       }
       //Unknown rules format
       else throw IOError("Could not parse rules: " + sOrig);
@@ -203,9 +168,7 @@ bool Rules::tryParseRules(const string& sOrig, Rules& buf) {
 }
 
 bool Rules::equals(const Rules& other) const {
-    return
-            endRule == other.endRule &&
-            scoringRule == other.scoringRule;
+    return gameRule == other.gameRule;
 }
 
 string Rules::toStringMaybeNice() const {

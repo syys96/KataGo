@@ -8,22 +8,12 @@
 
 struct Rules {
 
-  // Attax ends when no moves to go
-  static const int END_ATTAX_STANDARD = 0;
-  // Gomoku ends when full board or fix in a row
-  static const int END_GOMOKU_STANDARD = 1;
-  int endRule;
-
-  // Attax scores according to stone num
-  static const int SCORING_ATTAX_STANDARD = 0;
-  // Gpmoku scores according to who win
-  static const int SCORING_GOMOKU_STANDARD = 1;
-  int scoringRule;
+  enum GameRule{GAME_ATTAX_STANDARD = 0, GAME_GOMOKU_STANDARD = 1};
+  GameRule gameRule;
 
   Rules();
   Rules(
-    int eRule,
-    int sRule
+    GameRule gRule
   );
   ~Rules();
 
@@ -32,12 +22,9 @@ struct Rules {
 
   static Rules getStanddard();
 
-  static std::set<std::string> endRuleStrings();
-  static int parseEndRule(const std::string& s);
-  static std::string writeEndRule(int endRule);
-  static std::set<std::string> scoringRuleStrings();
-  static int parseScoringRule(const std::string& s);
-  static std::string writeScoringRule(int scoringRule);
+  static std::set<std::string> gameRuleStrings();
+  static GameRule parseGameRule(const std::string& s);
+  static std::string writeGameRule(GameRule endRule);
 
   bool equals(const Rules& other) const;
 
@@ -52,11 +39,7 @@ struct Rules {
   std::string toJsonString() const;
   nlohmann::json toJson() const;
 
-  static const Hash128 ZOBRIST_KO_RULE_HASH[4];
-  static const Hash128 ZOBRIST_SCORING_RULE_HASH[2];
-  static const Hash128 ZOBRIST_TAX_RULE_HASH[3];
-  static const Hash128 ZOBRIST_MULTI_STONE_SUICIDE_HASH;
-  static const Hash128 ZOBRIST_BUTTON_HASH;
+  static const Hash128 ZOBRIST_GAME_RULE_HASH[2];
 
 private:
   nlohmann::json toJsonHelper() const;
