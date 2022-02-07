@@ -104,10 +104,11 @@ struct BoardHistory {
   void makeBoardMoveAssumeLegal(Board& board, Loc moveLoc, Player movePla, const KoHashTable* rootKoHashTable);
   void makeBoardMoveAssumeLegal(Board& board, Loc moveLoc, Player movePla, const KoHashTable* rootKoHashTable, bool preventEncore);
 
-  bool thisMoveEndGame(Board& board, Loc moveLoc, Player movePla);
+  // 包括的情况：无子可下，等待数子=C_EMPTY，规则胜利=C_BLACK/C_WHITE，没有结束=C_WALL
+  static Color thisMoveEndGame(Board& board, Loc moveLoc, Player movePla);
 
   //Score the board as-is. If the game is already finished, and is NOT a no-result, then this should be idempotent.
-  void endAndScoreGameNow(const Board& board);
+  void endAndScoreGameNow(const Board& board, Color mWinner);
   void getAreaNow(const Board& board) const;
 
   void setWinnerByResignation(Player pla);
@@ -126,7 +127,8 @@ struct BoardHistory {
 
 private:
   bool koHashOccursInHistory(Hash128 koHash, const KoHashTable* rootKoHashTable) const;
-  int countAreaScoreWhiteMinusBlack(const Board& board) const;
+  static int countAreaScoreWhiteMinusBlack(const Board& board) ;
+  static float winScoreWhiteMinusBlack(const Board& board) ;
   void setFinalScoreAndWinner(float score);
 };
 

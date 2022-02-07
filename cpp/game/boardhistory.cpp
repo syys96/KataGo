@@ -284,7 +284,7 @@ int BoardHistory::numberOfKoHashOccurrencesInHistory(Hash128 koHash, const KoHas
 }
 
 
-int BoardHistory::countAreaScoreWhiteMinusBlack(const Board& board) const {
+int BoardHistory::countAreaScoreWhiteMinusBlack(const Board& board) {
   assert(rules.scoringRule == Rules::SCORING_ATTAX_STANDARD);
   int score = 0;
   for(int y = 0; y<board.y_size; y++) {
@@ -300,7 +300,6 @@ int BoardHistory::countAreaScoreWhiteMinusBlack(const Board& board) const {
 }
 
 void BoardHistory::setFinalScoreAndWinner(float score) {
-  assert(rules.scoringRule == Rules::SCOREING_NUM);
   finalWhiteMinusBlackScore = score;
   if(finalWhiteMinusBlackScore > 0.0f)
     winner = C_WHITE;
@@ -315,9 +314,15 @@ void BoardHistory::getAreaNow(const Board& board) const {
 }
 
 
-void BoardHistory::endAndScoreGameNow(const Board& board) {
+void BoardHistory::endAndScoreGameNow(const Board& board, Color mWinner) {
     int boardScore;
-    boardScore = countAreaScoreWhiteMinusBlack(board);
+    if (mWinner != C_EMPTY) {
+        // 规则给出胜负
+        boardScore = mWinner == C_WHITE ? 1.0f : (mWinner == C_BLACK ? -1.0f : 0.0f);
+    } else {
+        // 无子可下 数子给出胜负
+        boardScore = countAreaScoreWhiteMinusBlack(board);
+    }
     setFinalScoreAndWinner((float)boardScore);
     isScored = true;
     isNoResult = false;
@@ -463,12 +468,9 @@ void BoardHistory::makeBoardMoveAssumeLegal(Board& board, Loc moveLoc, Player mo
   }
 
   // check game end
-  if(thisMoveEndGame(board, moveLoc, movePla)) {
-    if (rules.endRule == Rules::END_STANDARD) {
-        endAndScoreGameNow(board);
-    } else {
-        ASSERT_UNREACHABLE;
-    }
+  Color mWinner = thisMoveEndGame(board, moveLoc, movePla);
+  if(mWinner != C_WALL) {
+      endAndScoreGameNow(board, mWinner);
   }
 
   //Break long cycles with no-result
@@ -573,8 +575,15 @@ Hash128 BoardHistory::getSituationRulesAndKoHash(const Board& board, const Board
   return hash;
 }
 
-bool BoardHistory::thisMoveEndGame(Board &board, Loc moveLoc, Player movePla) {
-    return false;
+Color BoardHistory::thisMoveEndGame(Board &board, Loc moveLoc, Player movePla) {
+    return C_WALL;
+}
+
+float BoardHistory::winScoreWhiteMinusBlack(const Board &board) {
+    assert(rules.scoringRule == Rules::SCORING_GOMOKU_STANDARD);
+    Color final_winner = thisMoveEndGame(board)
+    float_t boardScore;
+    boardScore = final_winner == C_WHITE ? 1.0f : (final_winner == C_BLACK ? -1.0f : 0.0f);
 }
 
 
