@@ -10,12 +10,6 @@ static Hash128 getKoHash(const Rules& rules, const Board& board, Player pla) {
 static Hash128 getKoHashAfterMoveNonEncore(const Rules& rules, Hash128 posHashAfterMove, Player pla) {
     return posHashAfterMove;
 }
-// static Hash128 getKoHashAfterMove(const Rules& rules, Hash128 posHashAfterMove, Player pla, int encorePhase, Hash128 koRecapBlockHashAfterMove) {
-//   if(rules.koRule == Rules::KO_SITUATIONAL || rules.koRule == Rules::KO_SIMPLE || encorePhase > 0)
-//     return posHashAfterMove ^ Board::ZOBRIST_PLAYER_HASH[pla] ^ koRecapBlockHashAfterMove;
-//   else
-//     return posHashAfterMove ^ koRecapBlockHashAfterMove;
-// }
 
 
 BoardHistory::BoardHistory()
@@ -245,16 +239,6 @@ const Board& BoardHistory::getRecentBoard(int numMovesAgo) const {
 }
 
 
-void BoardHistory::setKomi(float newKomi) {
-  float oldKomi = rules.komi;
-  rules.komi = newKomi;
-
-  //Recompute the game result due to the new komi
-  if(isGameFinished && isScored)
-    setFinalScoreAndWinner(finalWhiteMinusBlackScore - oldKomi + newKomi);
-}
-
-
 //If rootKoHashTable is provided, will take advantage of rootKoHashTable rather than search within the first
 //rootKoHashTable->size() moves of koHashHistory.
 //ALSO counts the most recent ko hash!
@@ -299,31 +283,10 @@ int BoardHistory::numberOfKoHashOccurrencesInHistory(Hash128 koHash, const KoHas
   return count;
 }
 
-float BoardHistory::whiteKomiAdjustmentForDraws(double drawEquivalentWinsForWhite) const {
-  //We fold the draw utility into the komi, for input into things like the neural net.
-  //Basically we model it as if the final score were jittered by a uniform draw from [-0.5,0.5].
-  //E.g. if komi from self perspective is 7 and a draw counts as 0.75 wins and 0.25 losses,
-  //then komi input should be as if it was 7.25, which in a jigo game when jittered by 0.5 gives white 75% wins and 25% losses.
-  float drawAdjustment = rules.gameResultWillBeInteger() ? (float)(drawEquivalentWinsForWhite - 0.5) : 0.0f;
-  return drawAdjustment;
-}
-
-float BoardHistory::currentSelfKomi(Player pla, double drawEquivalentWinsForWhite) const {
-  float whiteKomiAdjusted = rules.komi + whiteKomiAdjustmentForDraws(drawEquivalentWinsForWhite);
-
-  if(pla == P_WHITE)
-    return whiteKomiAdjusted;
-  else if(pla == P_BLACK)
-    return -whiteKomiAdjusted;
-  else {
-    assert(false);
-    return 0.0f;
-  }
-}
 
 int BoardHistory::countAreaScoreWhiteMinusBlack(const Board& board) const {
+  assert(rules.scoringRule == Rules::SCORING_ATTAX_STANDARD);
   int score = 0;
-
   for(int y = 0; y<board.y_size; y++) {
     for(int x = 0; x<board.x_size; x++) {
       Loc loc = Location::getLoc(x,y,board.x_size);
@@ -333,7 +296,6 @@ int BoardHistory::countAreaScoreWhiteMinusBlack(const Board& board) const {
         score -= 1;
     }
   }
-
   return score;
 }
 
@@ -348,19 +310,15 @@ void BoardHistory::setFinalScoreAndWinner(float score) {
     winner = C_EMPTY;
 }
 
-void BoardHistory::getAreaNow(const Board& board, Color area[Board::MAX_ARR_SIZE]) const {
-    countAreaScoreWhiteMinusBlack(board,area);
+void BoardHistory::getAreaNow(const Board& board) const {
+    countAreaScoreWhiteMinusBlack(board);
 }
 
 
 void BoardHistory::endAndScoreGameNow(const Board& board) {
     int boardScore;
-    if(rules.scoringRule == Rules::SCOREING_NUM)
-        boardScore = countAreaScoreWhiteMinusBlack(board);
-    else
-        ASSERT_UNREACHABLE;
-
-    setFinalScoreAndWinner(boardScore + rules.komi);
+    boardScore = countAreaScoreWhiteMinusBlack(board);
+    setFinalScoreAndWinner((float)boardScore);
     isScored = true;
     isNoResult = false;
     isResignation = false;

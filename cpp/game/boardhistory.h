@@ -81,13 +81,10 @@ struct BoardHistory {
 
   //Clears all history and status and bonus points, sets encore phase and rules
   void clear(const Board& board, Player pla, const Rules& rules);
-  //Set only the komi field of the rules, does not clear history, but does clear game-over conditions,
-  void setKomi(float newKomi);
+
   //Set the initial turn number. Affects nothing else.
   void setInitialTurnNumber(int n);
 
-  float whiteKomiAdjustmentForDraws(double drawEquivalentWinsForWhite) const;
-  float currentSelfKomi(Player pla, double drawEquivalentWinsForWhite) const;
 
   //Returns a reference a recent board state, where 0 is the current board, 1 is 1 move ago, etc.
   //Requires that numMovesAgo < NUM_RECENT_BOARDS
@@ -111,7 +108,7 @@ struct BoardHistory {
 
   //Score the board as-is. If the game is already finished, and is NOT a no-result, then this should be idempotent.
   void endAndScoreGameNow(const Board& board);
-  void getAreaNow(const Board& board, Color area[Board::MAX_ARR_SIZE]) const;
+  void getAreaNow(const Board& board) const;
 
   void setWinnerByResignation(Player pla);
 

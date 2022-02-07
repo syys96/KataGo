@@ -8,19 +8,17 @@ using namespace std;
 using json = nlohmann::json;
 
 Rules::Rules() {
-  //Defaults if not set - closest match to TT rules
-  endRule = END_STANDARD;
-  komi = 0.0f;
+  //Defaults to Attax rules
+  endRule = END_ATTAX_STANDARD;
+  scoringRule = SCORING_ATTAX_STANDARD;
 }
 
 Rules::Rules(
   int eRule,
-  int sRule,
-  float km
+  int sRule
 )
   :endRule(eRule),
-   scoringRule(sRule),
-   komi(km)
+   scoringRule(sRule)
 {}
 
 Rules::~Rules() {
@@ -29,64 +27,62 @@ Rules::~Rules() {
 bool Rules::operator==(const Rules& other) const {
   return
     endRule == other.endRule &&
-    scoringRule == other.scoringRule &&
-    komi == other.komi;
+    scoringRule == other.scoringRule;
 }
 
 bool Rules::operator!=(const Rules& other) const {
   return
     endRule != other.endRule ||
-    scoringRule != other.scoringRule ||
-    komi != other.komi;
+    scoringRule != other.scoringRule;
 }
 
-bool Rules::equalsIgnoringKomi(const Rules& other) const {
-  return
-    endRule == other.endRule;
-}
-
-bool Rules::gameResultWillBeInteger() const {
-  bool komiIsInteger = ((int)komi) == komi;
-  return komiIsInteger;
-}
 
 Rules Rules::getStanddard() {
     Rules rules;
-    rules.endRule = END_STANDARD;
-    rules.komi = 0.0f;
+    rules.scoringRule = SCORING_ATTAX_STANDARD;
+    rules.endRule = END_ATTAX_STANDARD;
     return rules;
 }
 
 
-bool Rules::komiIsIntOrHalfInt(float komi) {
-  return std::isfinite(komi) && komi * 2 == (int)(komi * 2);
+set<string> Rules::endRuleStrings() {
+  return {"END_ATTAX_STANDARD, END_GOMOKU_STANDARD"};
 }
 
-set<string> Rules::endRuleStrings() {
-  return {"STANDARD"};
+set<string> Rules::scoringRuleStrings() {
+    return {"SCORING_ATTAX_STANDARD, SCORING_GOMOKU_STANDARD"};
 }
 
 int Rules::parseEndRule(const string& s) {
-  if(s == "STANDARD") return Rules::END_STANDARD;
+  if(s == "END_ATTAX_STANDARD") return Rules::END_ATTAX_STANDARD;
+  else if(s == "END_GOMOKU_STANDARD") return Rules::END_GOMOKU_STANDARD;
   else throw IOError("Rules::parseEndRule: Invalid end rule: " + s);
 }
 
-string Rules::writeEndRule(int koRule) {
-  if(koRule == Rules::END_STANDARD) return string("STANDARD");
+int Rules::parseScoringRule(const string& s) {
+    if(s == "SCORING_ATTAX_STANDARD") return Rules::SCORING_ATTAX_STANDARD;
+    else if(s == "SCORING_GOMOKU_STANDARD") return Rules::SCORING_GOMOKU_STANDARD;
+    else throw IOError("Rules::parseScoringRule: Invalid end rule: " + s);
+}
+
+string Rules::writeEndRule(int endRule) {
+  if(endRule == Rules::END_ATTAX_STANDARD) return string("END_ATTAX_STANDARD");
+  else if(endRule == Rules::END_GOMOKU_STANDARD) return string("END_GOMOKU_STANDARD");
   return string("UNKNOWN");
+}
+
+string Rules::writeScoringRule(int scoringRule) {
+    if(scoringRule == Rules::SCORING_ATTAX_STANDARD) return string("SCORING_ATTAX_STANDARD");
+    else if(scoringRule == Rules::SCORING_GOMOKU_STANDARD) return string("SCORING_GOMOKU_STANDARD");
+    return string("UNKNOWN");
 }
 
 ostream& operator<<(ostream& out, const Rules& rules) {
   out << "end" << Rules::writeEndRule(rules.endRule);
-  out << "komi" << rules.komi;
+  out << "scoring" << Rules::writeScoringRule(rules.scoringRule);
   return out;
 }
 
-string Rules::toStringNoKomi() const {
-  ostringstream out;
-  out << "end" << Rules::writeEndRule(endRule);
-  return out.str();
-}
 
 string Rules::toString() const {
   ostringstream out;
@@ -94,38 +90,19 @@ string Rules::toString() const {
   return out.str();
 }
 
-//omitDefaults: Takes up a lot of string space to include stuff, so omit some less common things if matches tromp-taylor rules
-//which is the default for parsing and if not otherwise specified
-json Rules::toJsonHelper(bool omitKomi, bool omitDefaults) const {
+json Rules::toJsonHelper() const {
   json ret;
   ret["end"] = writeEndRule(endRule);
-  if(!omitKomi)
-    ret["komi"] = komi;
+  ret["scoring"] = writeScoringRule(scoringRule);
   return ret;
 }
 
 json Rules::toJson() const {
-  return toJsonHelper(false,false);
-}
-
-json Rules::toJsonNoKomi() const {
-  return toJsonHelper(true,false);
-}
-
-json Rules::toJsonNoKomiMaybeOmitStuff() const {
-  return toJsonHelper(true,true);
+  return toJsonHelper();
 }
 
 string Rules::toJsonString() const {
-  return toJsonHelper(false,false).dump();
-}
-
-string Rules::toJsonStringNoKomi() const {
-  return toJsonHelper(true,false).dump();
-}
-
-string Rules::toJsonStringNoKomiMaybeOmitStuff() const {
-  return toJsonHelper(true,true).dump();
+  return toJsonHelper().dump();
 }
 
 Rules Rules::updateRules(const string& k, const string& v, Rules oldRules) {
@@ -133,46 +110,40 @@ Rules Rules::updateRules(const string& k, const string& v, Rules oldRules) {
   string key = Global::trim(k);
   string value = Global::trim(Global::toUpper(v));
   if(key == "end") rules.endRule = Rules::parseEndRule(value);
+  else if (key == "scoring") rules.scoringRule = Rules::parseScoringRule(value);
   else throw IOError("Unknown rules option: " + key);
   return rules;
 }
 
-static Rules parseRulesHelper(const string& sOrig, bool allowKomi) {
+static Rules parseRulesHelper(const string& sOrig) {
   Rules rules;
   string lowercased = Global::trim(Global::toLower(sOrig));
-  if(lowercased == "standard") {
-    rules.endRule = Rules::END_STANDARD;
-    rules.komi = 0.0f;
+  if(lowercased == "attax_standard") {
+    rules.endRule = Rules::END_ATTAX_STANDARD;
+    rules.scoringRule = Rules::SCORING_ATTAX_STANDARD;
+  }
+  else if (lowercased == "gomoku_standard") {
+      rules.endRule = Rules::END_GOMOKU_STANDARD;
+      rules.scoringRule = Rules::SCORING_GOMOKU_STANDARD;
   }
   else if(sOrig.length() > 0 && sOrig[0] == '{') {
     //Default if not specified
     rules = Rules::getStanddard();
-    bool komiSpecified = false;
     try {
       json input = json::parse(sOrig);
       string s;
       for(json::iterator iter = input.begin(); iter != input.end(); ++iter) {
-        string key = iter.key();
+        const string key = iter.key();
         if(key == "end")
           rules.endRule = Rules::parseEndRule(iter.value().get<string>());
-        else if(key == "komi") {
-          if(!allowKomi)
-            throw IOError("Unknown rules option: " + key);
-          rules.komi = iter.value().get<float>();
-          komiSpecified = true;
-          if(rules.komi < Rules::MIN_USER_KOMI || rules.komi > Rules::MAX_USER_KOMI || !Rules::komiIsIntOrHalfInt(rules.komi))
-            throw IOError("Komi value is not a half-integer or is too extreme");
-        }
+        else if (key == "scoring")
+          rules.scoringRule = Rules::parseScoringRule(iter.value().get<string>());
         else
           throw IOError("Unknown rules option: " + key);
       }
     }
     catch(nlohmann::detail::exception&) {
       throw IOError("Could not parse rules: " + sOrig);
-    }
-    if(!komiSpecified) {
-      //Drop default komi to 0.0
-      rules.komi = 0.0f;
     }
   }
 
@@ -196,40 +167,23 @@ static Rules parseRulesHelper(const string& sOrig, bool allowKomi) {
     if(s.length() <= 0)
       throw IOError("Could not parse rules: " + sOrig);
 
-    bool komiSpecified = false;
     while(true) {
       if(s.length() <= 0)
         break;
-
-      if(startsWithAndStrip(s,"komi")) {
-        if(!allowKomi)
-          throw IOError("Could not parse rules: " + sOrig);
-        int endIdx = 0;
-        while(endIdx < s.length() && !Global::isAlpha(s[endIdx] && !Global::isWhitespace(s[endIdx])))
-          endIdx++;
-        float komi;
-        bool suc = Global::tryStringToFloat(s.substr(0,endIdx),komi);
-        if(!suc)
-          throw IOError("Could not parse rules: " + sOrig);
-        if(!std::isfinite(komi) || komi > 1e5 || komi < -1e5)
-          throw IOError("Could not parse rules: " + sOrig);
-        rules.komi = komi;
-        komiSpecified = true;
-        s = s.substr(endIdx);
-        s = Global::trim(s);
-        continue;
-      }
       if(startsWithAndStrip(s,"end")) {
-        if(startsWithAndStrip(s,"STANDARD")) rules.endRule = Rules::END_STANDARD;
+        if(startsWithAndStrip(s,"ATTAX_STANDARD")) rules.endRule = Rules::END_ATTAX_STANDARD;
+        else if(startsWithAndStrip(s,"GOMOKU_STANDARD")) rules.endRule = Rules::END_GOMOKU_STANDARD;
         else throw IOError("Could not parse rules: " + sOrig);
         continue;
       }
+      if(startsWithAndStrip(s,"scoring")) {
+          if(startsWithAndStrip(s,"ATTAX_STANDARD")) rules.endRule = Rules::SCORING_ATTAX_STANDARD;
+          else if(startsWithAndStrip(s,"GOMOKU_STANDARD")) rules.endRule = Rules::SCORING_GOMOKU_STANDARD;
+          else throw IOError("Could not parse rules: " + sOrig);
+          continue;
+      }
       //Unknown rules format
       else throw IOError("Could not parse rules: " + sOrig);
-    }
-    if(!komiSpecified) {
-      //Drop default komi to 0.0
-      rules.komi = 0.0f;
     }
   }
 
@@ -237,46 +191,29 @@ static Rules parseRulesHelper(const string& sOrig, bool allowKomi) {
 }
 
 Rules Rules::parseRules(const string& sOrig) {
-  return parseRulesHelper(sOrig,true);
-}
-Rules Rules::parseRulesWithoutKomi(const string& sOrig, float komi) {
-  Rules rules = parseRulesHelper(sOrig,false);
-  rules.komi = komi;
-  return rules;
+  return parseRulesHelper(sOrig);
 }
 
 bool Rules::tryParseRules(const string& sOrig, Rules& buf) {
   Rules rules;
-  try { rules = parseRulesHelper(sOrig,true); }
+  try { rules = parseRulesHelper(sOrig); }
   catch(const StringError&) { return false; }
-  buf = rules;
-  return true;
-}
-bool Rules::tryParseRulesWithoutKomi(const string& sOrig, Rules& buf, float komi) {
-  Rules rules;
-  try { rules = parseRulesHelper(sOrig,false); }
-  catch(const StringError&) { return false; }
-  rules.komi = komi;
   buf = rules;
   return true;
 }
 
-string Rules::toStringNoKomiMaybeNice() const {
-  if(equalsIgnoringKomi(parseRulesHelper("TrompTaylor",false)))
-    return "TrompTaylor";
-  if(equalsIgnoringKomi(parseRulesHelper("Japanese",false)))
-    return "Japanese";
-  if(equalsIgnoringKomi(parseRulesHelper("Chinese",false)))
-    return "Chinese";
-  if(equalsIgnoringKomi(parseRulesHelper("Chinese-OGS",false)))
-    return "Chinese-OGS";
-  if(equalsIgnoringKomi(parseRulesHelper("AGA",false)))
-    return "AGA";
-  if(equalsIgnoringKomi(parseRulesHelper("StoneScoring",false)))
-    return "StoneScoring";
-  if(equalsIgnoringKomi(parseRulesHelper("NewZealand",false)))
-    return "NewZealand";
-  return toStringNoKomi();
+bool Rules::equals(const Rules& other) const {
+    return
+            endRule == other.endRule &&
+            scoringRule == other.scoringRule;
+}
+
+string Rules::toStringMaybeNice() const {
+  if(equals(parseRulesHelper("attax_standard")))
+    return "ATTAX_STANDARD";
+  if(equals(parseRulesHelper("gomoku_standard")))
+    return "GOMOKU_STANDARD";
+  return toString();
 }
 
 
