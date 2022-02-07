@@ -8,12 +8,16 @@
 
 struct Rules {
 
-  static const int END_NONE = 0;
-  static const int END_STANDARD = 1;
+  // Attax ends when no moves to go
+  static const int END_ATTAX_STANDARD = 0;
+  // Gomoku ends when full board or fix in a row
+  static const int END_GOMOKU_STANDARD = 1;
   int endRule;
 
-  static const int SCOREING_NONE = 0;
-  static const int SCOREING_NUM = 1;
+  // Attax scores according to stone num
+  static const int SCORING_ATTAX_STANDARD = 0;
+  // Gpmoku scores according to who win
+  static const int SCOREING_GOMOKU_STANDARD = 1;
   int scoringRule;
 
   float komi;
